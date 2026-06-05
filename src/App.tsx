@@ -67,6 +67,7 @@ function App() {
   const [statusMsg, setStatusMsg] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
+  const [projectKey, setProjectKey] = useState(0);
 
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
@@ -83,6 +84,7 @@ function App() {
       const pName = name || path.split("/").pop() || path;
       setProjectPath(path);
       setProjectName(pName);
+      setProjectKey(k => k + 1);
       setStatusMsg(msg);
       addRecent(pName, path);
       const toc = await invoke<TocNode[]>("get_toc");
@@ -122,6 +124,7 @@ function App() {
 
       setProjectName(name);
       setProjectPath(pathPart.trim());
+      setProjectKey(k => k + 1);
       setStatusMsg(msg);
       addRecent(name, pathPart.trim());
 
@@ -308,7 +311,7 @@ function App() {
       <div className="panel-center">
         <div className="workbench-split" id="workbench-split">
           <div className="wb-left" style={{ width: `${splitPct}%` }}>
-            <PdfViewer projectPath={projectPath} docName={projectName} />
+            <PdfViewer key={projectKey} projectPath={projectPath} docName={projectName} />
           </div>
           <div className="resize-handle resize-h" {...bindSplit({ usePercent: true, getContainerWidth: () => document.getElementById("workbench-split")?.clientWidth ?? 800 })} />
           <div className="wb-right" style={{ flex: 1 }}>

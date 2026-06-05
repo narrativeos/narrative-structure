@@ -16,7 +16,9 @@ export default function PdfViewer({ projectPath }: PdfViewerProps) {
     invoke<string | null>("find_asset_file", { pattern: "_layout.pdf" })
       .then((found) => {
         if (found) {
-          setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(found)}#view=FitH`);
+          const url = `narrativestructure://localhost/${encodeURIComponent(found)}?t=${Date.now()}#view=FitH`;
+          console.log("PDF URL:", url);
+          setPdfUrl(url);
         }
         setLoading(false);
       })
@@ -28,8 +30,19 @@ export default function PdfViewer({ projectPath }: PdfViewerProps) {
 
   return (
     <div className="pdf-viewer">
+      <button
+        className="pdf-fit-btn"
+        title="恢复全宽"
+        onClick={() => {
+          // force reload with FitH
+          const base = pdfUrl!.split("#")[0].split("?")[0];
+          setPdfUrl(`${base}?t=${Date.now()}#view=FitH`);
+        }}
+      >
+        ↔
+      </button>
       <div className="pdf-content">
-        <embed src={pdfUrl} type="application/pdf" className="pdf-embed" />
+        <iframe src={pdfUrl} className="pdf-embed" title="PDF Preview" />
       </div>
     </div>
   );
