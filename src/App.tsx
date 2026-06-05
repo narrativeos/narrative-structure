@@ -30,19 +30,19 @@ function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<Block | null>(null);
-  const [statusMsg, setStatusMsg] = useState("请打开一个项目以开始");
+  const [statusMsg, setStatusMsg] = useState("");
 
-  // 通过 Tauri invoke 打开项目
-  const handleOpenProject = useCallback(async () => {
+  // =========================================================================
+  // 加载项目（打开或新建后调用）
+  // =========================================================================
+  const loadProject = useCallback(async (path: string) => {
     try {
-      // 使用 Tauri dialog (简化版：直接使用已知路径)
       const { invoke } = await import("@tauri-apps/api/core");
-      const demoPath = "Projects/MyDocument_A";
-      const msg = await invoke<string>("open_project", { path: demoPath });
-      setProjectPath(demoPath);
+
+      const msg = await invoke<string>("open_project", { path });
+      setProjectPath(path);
       setStatusMsg(msg);
 
-      // 加载目录树
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
     } catch (err) {
@@ -50,7 +50,69 @@ function App() {
     }
   }, []);
 
-  // 点击目录项 → 加载该块及子块
+  // =========================================================================
+  // 新建项目
+  // =========================================================================
+  const handleNewProject = useCallback(async () => {
+    const name = window.prompt("输入项目名称:");
+    if (!name?.trim()) return;
+
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const projectsDir = "Projects"; // 默认创建在 Projects/ 下
+      const msg = await invoke<string>("create_project", {
+        parentDir: projectsDir,
+        projectName: name.trim(),
+      });
+      // create_project 内部已自动打开，只需同步前端状态
+      const fullPath = `${projectsDir}/${name.trim()}`;
+      setProjectPath(fullPath);
+      setStatusMsg(msg);
+
+      const toc = await invoke<TocNode[]>("get_toc");
+      setTocTree(toc);
+    } catch (err) {
+      setStatusMsg(`创建失败: ${err}`);
+    }
+  }, []);
+
+  // =========================================================================
+  // 打开已有项目（原生文件夹选择）
+  // =========================================================================
+  const handleOpenProject = useCallback(async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: "选择项目文件夹（包含 narrative.db）",
+      });
+
+      if (selected) {
+        await loadProject(selected as string);
+      }
+    } catch (err) {
+      setStatusMsg(`打开失败: ${err}`);
+    }
+  }, [loadProject]);
+
+  // =========================================================================
+  // 关闭当前项目 → 回到欢迎页
+  // =========================================================================
+  const handleCloseProject = useCallback(async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke<string>("close_project");
+    } catch { /* ignore */ }
+    setProjectPath(null);
+    setTocTree([]);
+    setActiveBlock(null);
+    setStatusMsg("");
+  }, []);
+
+  // =========================================================================
+  // 目录树 / 编辑器交互
+  // =========================================================================
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
@@ -67,7 +129,6 @@ function App() {
     }
   }, []);
 
-  // 编辑器内容变更 → DEBOUNCE 后更新数据库
   const handleContentChange = useCallback(
     async (blockId: string, newContent: string, version: number) => {
       try {
@@ -86,28 +147,64 @@ function App() {
     [],
   );
 
+  // =========================================================================
+  // 欢迎页 (无项目打开时)
+  // =========================================================================
+  if (!projectPath) {
+    return (
+      <div className="welcome-screen">
+        <div className="welcome-card">
+          <div className="welcome-icon">🧱</div>
+          <h1 className="welcome-title">NarrativeStructure</h1>
+          <p className="welcome-subtitle">文档智能化重构工作台</p>
+          <p className="welcome-desc">
+            以语义块为最小单元，将超大型文档离散化为可操作的知识资产
+          </p>
+
+          <div className="welcome-actions">
+            <button className="btn btn-primary" onClick={handleNewProject}>
+              ＋ 新建项目
+            </button>
+            <button className="btn btn-secondary" onClick={handleOpenProject}>
+              📂 打开项目
+            </button>
+          </div>
+
+          <div className="welcome-recent">
+            <h4>最近打开</h4>
+            <p className="welcome-recent-empty">（暂无历史记录）</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // 工作台 (项目已打开)
+  // =========================================================================
   return (
     <div className="app-container">
-      {/* 顶部工具栏 */}
       <header className="toolbar">
         <h1 className="app-title">NarrativeStructure</h1>
-        <div className="toolbar-actions">
-          <button onClick={handleOpenProject} disabled={!!projectPath}>
-            {projectPath ? `📂 ${projectPath}` : "📂 打开项目"}
+        <div className="toolbar-project">
+          <span className="project-path" title={projectPath}>
+            📁 {projectPath}
+          </span>
+          <button className="btn-close" onClick={handleCloseProject} title="关闭项目">
+            ✕
           </button>
+        </div>
+        <div className="toolbar-actions">
           <span className="status-msg">{statusMsg}</span>
         </div>
       </header>
 
-      {/* 主体区域 */}
       <div className="main-area">
-        {/* 左侧目录树 */}
         <aside className="sidebar">
           <h3>📑 文档目录</h3>
           <TOC nodes={tocTree} onSelect={handleSelectBlock} />
         </aside>
 
-        {/* 右侧编辑器 */}
         <main className="editor-area">
           <Editor block={activeBlock} onChange={handleContentChange} />
         </main>

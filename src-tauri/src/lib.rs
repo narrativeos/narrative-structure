@@ -7,9 +7,11 @@ use project_manager::ProjectState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ProjectState::new())
         .invoke_handler(tauri::generate_handler![
             // project_manager
+            project_manager::create_project,
             project_manager::open_project,
             project_manager::close_project,
             project_manager::get_project_path,
