@@ -2,6 +2,11 @@ import { useState } from "react";
 import type { TocNode } from "../App";
 import "./TOC.css";
 
+/** 去掉 Markdown 标题标记 `#` 和首尾空格 */
+function cleanTitle(text: string): string {
+  return text.replace(/^#{1,6}\s*/, "").trim();
+}
+
 interface TOCProps {
   nodes: TocNode[];
   onSelect: (nodeId: string) => void;
@@ -30,7 +35,7 @@ function TOCItem({ node, onSelect }: { node: TocNode; onSelect: (id: string) => 
           <span className="toc-toggle placeholder" />
         )}
         <span className="toc-label" title={node.content_preview}>
-          {node.content_preview || "(无标题)"}
+          {cleanTitle(node.content_preview) || "(无标题)"}
         </span>
       </div>
       {hasChildren && expanded && (

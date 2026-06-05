@@ -6,6 +6,7 @@ import BlockEditor from "./components/Editor";
 import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
+import PipelineStatus from "./components/PipelineStatus";
 import "./App.css";
 
 export interface TocNode {
@@ -29,6 +30,10 @@ export interface Block {
   version: number;
   created_at: string;
   updated_at: string;
+}
+
+function countNodes(node: TocNode): number {
+  return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
 }
 
 function App() {
@@ -157,14 +162,8 @@ function App() {
   // =========================================================================
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
-      const blocks = await invoke<Block[]>("get_blocks", {
-        parentId: nodeId,
-        limit: 50,
-        offset: 0,
-      });
-      if (blocks.length > 0) {
-        setActiveBlock(blocks[0]);
-      }
+      const block = await invoke<Block>("get_block", { id: nodeId });
+      setActiveBlock(block);
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
     }
@@ -259,6 +258,11 @@ function App() {
           </div>
         </div>
       </div>
+
+      <aside className="panel-right">
+        <h3>⚙️ 流程状态</h3>
+        <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
+      </aside>
 
       <footer className="panel-bottom">
         <AgentConsole />

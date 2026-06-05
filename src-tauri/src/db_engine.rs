@@ -267,6 +267,38 @@ pub fn search_blocks(
     Ok(blocks)
 }
 
+/// 获取单个块
+#[tauri::command]
+pub fn get_block(
+    state: tauri::State<'_, ProjectState>,
+    id: String,
+) -> Result<Block, String> {
+    let conn_guard = get_conn(&state)?;
+    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
+
+    conn.query_row(
+        "SELECT id, parent_id, order_idx, level, block_type, content, metadata,
+                version, created_at, updated_at
+         FROM blocks WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(Block {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                order_idx: row.get(2)?,
+                level: row.get(3)?,
+                block_type: row.get(4)?,
+                content: row.get(5)?,
+                metadata: row.get(6)?,
+                version: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    )
+    .map_err(|e| format!("块不存在: {}", e))
+}
+
 /// 获取块的子块数量
 #[tauri::command]
 pub fn get_child_count(

@@ -1,0 +1,62 @@
+.ps-container {
+  font-size: 12px;
+}
+
+.ps-stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 12px;
+}
+
+.ps-stat-label {
+  color: var(--color-text-dim);
+}
+
+.ps-stat-value {
+  color: var(--color-accent);
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.ps-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ps-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  position: relative;
+}
+
+.ps-step.done .ps-step-label {
+  color: var(--color-text);
+}
+
+.ps-step:not(.done) .ps-step-label {
+  color: var(--color-text-dim);
+}
+
+.ps-step-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.ps-step-label {
+  font-size: 12px;
+}
+
+.ps-step-line {
+  position: absolute;
+  left: 5px;
+  top: 18px;
+  width: 1px;
+  height: 8px;
+  background: var(--color-border);
+}

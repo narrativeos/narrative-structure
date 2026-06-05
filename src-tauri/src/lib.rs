@@ -21,6 +21,7 @@ pub fn run() {
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,
+            db_engine::get_block,
             db_engine::update_block,
             db_engine::search_blocks,
             db_engine::get_child_count,
