@@ -17,6 +17,7 @@ pub fn run() {
             project_manager::close_project,
             project_manager::get_project_path,
             project_manager::import_document,
+            project_manager::list_project_files,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,

@@ -2,7 +2,10 @@ import { useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
-import Editor from "./components/Editor";
+import BlockEditor from "./components/Editor";
+import FileExplorer from "./components/FileExplorer";
+import PdfViewer from "./components/PdfViewer";
+import AgentConsole from "./components/AgentConsole";
 import "./App.css";
 
 export interface TocNode {
@@ -222,38 +225,44 @@ function App() {
   }
 
   // =========================================================================
-  // 工作台 (项目已打开)
+  // 主界面：三区布局
   // =========================================================================
   return (
-    <div className="app-container">
+    <div className="app-grid">
       <header className="toolbar">
         <h1 className="app-title">NarrativeStructure</h1>
         <div className="toolbar-project">
-          <span className="project-path" title={projectPath}>
-            📁 {projectName}
-          </span>
-          <button className="btn-close" onClick={handleCloseProject} title="关闭项目">
-            ✕
-          </button>
+          <span className="project-path" title={projectPath}>📁 {projectName}</span>
+          <button className="btn-close" onClick={handleCloseProject} title="关闭项目">✕</button>
         </div>
         <div className="toolbar-actions">
-          <button className="btn-import" onClick={handleImportDocument} title="导入 MinerU 输出 zip">
-            📥 导入文档
-          </button>
+          <button className="btn-import" onClick={handleImportDocument} title="追加导入">📥</button>
           <span className="status-msg">{statusMsg}</span>
         </div>
       </header>
 
-      <div className="main-area">
-        <aside className="sidebar">
-          <h3>📑 文档目录</h3>
+      <aside className="panel-left">
+        <div className="panel-section toc-section">
+          <h3>📑 语义目录</h3>
           <TOC nodes={tocTree} onSelect={handleSelectBlock} />
-        </aside>
+        </div>
+        <FileExplorer projectPath={projectPath} />
+      </aside>
 
-        <main className="editor-area">
-          <Editor block={activeBlock} onChange={handleContentChange} />
-        </main>
+      <div className="panel-center">
+        <div className="workbench-split">
+          <div className="wb-left">
+            <PdfViewer projectPath={projectPath} docName={projectName} />
+          </div>
+          <div className="wb-right">
+            <BlockEditor block={activeBlock} onChange={handleContentChange} />
+          </div>
+        </div>
       </div>
+
+      <footer className="panel-bottom">
+        <AgentConsole />
+      </footer>
     </div>
   );
 }

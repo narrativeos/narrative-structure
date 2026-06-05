@@ -433,6 +433,39 @@ pub fn get_project_path(state: tauri::State<'_, ProjectState>) -> Result<Option<
     Ok(path_guard.as_ref().map(|p| p.display().to_string()))
 }
 
+/// 列出项目 assets 目录下的所有文件
+#[tauri::command]
+pub fn list_project_files(
+    state: tauri::State<'_, ProjectState>,
+) -> Result<Vec<String>, String> {
+    let path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
+    let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
+
+    let assets_dir = project_path.join("assets");
+    if !assets_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut files = Vec::new();
+    collect_files(&assets_dir, &assets_dir, &mut files);
+    files.sort();
+    Ok(files)
+}
+
+fn collect_files(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let rel = path.strip_prefix(base).unwrap_or(&path);
+            if path.is_dir() {
+                collect_files(base, &path, out);
+            } else {
+                out.push(rel.display().to_string());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

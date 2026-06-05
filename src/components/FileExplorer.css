@@ -1,0 +1,54 @@
+.file-explorer {
+  padding: 8px 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.fe-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: 8px 16px 4px;
+  letter-spacing: 0.5px;
+}
+
+.fe-empty {
+  padding: 8px 16px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.fe-group {
+  margin-bottom: 4px;
+}
+
+.fe-dir {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  padding: 4px 16px 0;
+  font-weight: 600;
+}
+
+.fe-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.fe-item:hover {
+  background: rgba(255,255,255,0.04);
+}
+
+.fe-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.fe-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
