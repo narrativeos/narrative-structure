@@ -189,6 +189,29 @@ html, body, #root {
   border-bottom: none;
 }
 
+/* ---- 拖拽手柄 ---- */
+.resize-handle {
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 10;
+  user-select: none;
+}
+
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--color-accent);
+}
+
+.resize-h {
+  cursor: col-resize;
+  width: 4px;
+}
+
+.resize-v {
+  cursor: row-resize;
+  height: 4px;
+}
+
 /* ================================================================
    欢迎页 (无项目打开时)
    ================================================================ */

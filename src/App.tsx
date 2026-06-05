@@ -8,6 +8,7 @@ import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
 import LogPanel from "./components/LogPanel";
+import { useResizable } from "./hooks/useResizable";
 import "./App.css";
 
 export interface TocNode {
@@ -43,7 +44,11 @@ function App() {
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<Block | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
-
+  // 可拖拽面板尺寸
+  const [leftW, bindLeft] = useResizable(240, 160, 500);
+  const [rightW, bindRight] = useResizable(220, 160, 400);
+  const [splitPct, bindSplit] = useResizable(40, 20, 80);
+  const [bottomH, bindBottom] = useResizable(140, 60, 400, "y");
   // =========================================================================
   // 加载项目（打开已有项目后调用）
   // =========================================================================
@@ -228,7 +233,10 @@ function App() {
   // 主界面：三区布局
   // =========================================================================
   return (
-    <div className="app-grid">
+    <div className="app-grid" style={{
+      gridTemplateColumns: `${leftW}px 4px 1fr 4px ${rightW}px`,
+      gridTemplateRows: `var(--toolbar-height) 1fr 4px ${bottomH}px`,
+    }}>
       <header className="toolbar">
         <h1 className="app-title">NarrativeStructure</h1>
         <div className="toolbar-project">
@@ -251,16 +259,21 @@ function App() {
         </div>
       </aside>
 
+      <div className="resize-handle resize-h" {...bindLeft()} />
+
       <div className="panel-center">
         <div className="workbench-split">
-          <div className="wb-left">
+          <div className="wb-left" style={{ width: `${splitPct}%` }}>
             <PdfViewer projectPath={projectPath} docName={projectName} />
           </div>
-          <div className="wb-right">
+          <div className="resize-handle resize-h" {...bindSplit()} />
+          <div className="wb-right" style={{ flex: 1 }}>
             <BlockEditor block={activeBlock} onChange={handleContentChange} />
           </div>
         </div>
       </div>
+
+      <div className="resize-handle resize-h" {...bindRight(true)} />
 
       <aside className="panel-right">
         <div className="pr-section">
@@ -272,6 +285,8 @@ function App() {
           <AgentConsole />
         </div>
       </aside>
+
+      <div className="resize-handle resize-v" {...bindBottom()} />
 
       <footer className="panel-bottom">
         <LogPanel />
