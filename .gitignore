@@ -18,9 +18,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Project data (user projects not tracked)
-Projects/*
-!Projects/MyDocument_A/
+# Template project DB (created by init_db.py)
 Projects/MyDocument_A/narrative.db
 
 # Env
