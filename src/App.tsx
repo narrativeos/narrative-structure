@@ -235,7 +235,8 @@ function App() {
   return (
     <div className="app-grid" style={{
       gridTemplateColumns: `${leftW}px 4px 1fr 4px ${rightW}px`,
-      gridTemplateRows: `var(--toolbar-height) 1fr 4px ${bottomH}px`,
+      gridTemplateRows: `40px 1fr 4px ${bottomH}px`,
+      gridTemplateAreas: `"toolbar toolbar toolbar toolbar toolbar" "left handle-c center handle-r right" "hbot hbot hbot hbot hbot" "bottom bottom bottom bottom bottom"`,
     }}>
       <header className="toolbar">
         <h1 className="app-title">NarrativeStructure</h1>
@@ -259,7 +260,7 @@ function App() {
         </div>
       </aside>
 
-      <div className="resize-handle resize-h" {...bindLeft()} />
+      <div className="resize-handle resize-h" style={{ gridArea: "handle-c" }} {...bindLeft()} />
 
       <div className="panel-center">
         <div className="workbench-split">
@@ -273,7 +274,7 @@ function App() {
         </div>
       </div>
 
-      <div className="resize-handle resize-h" {...bindRight(true)} />
+      <div className="resize-handle resize-h" style={{ gridArea: "handle-r" }} {...bindRight(true)} />
 
       <aside className="panel-right">
         <div className="pr-section">
@@ -286,7 +287,7 @@ function App() {
         </div>
       </aside>
 
-      <div className="resize-handle resize-v" {...bindBottom()} />
+      <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom()} />
 
       <footer className="panel-bottom">
         <LogPanel />

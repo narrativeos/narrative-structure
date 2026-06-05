@@ -32,12 +32,6 @@ html, body, #root {
 
 .app-grid {
   display: grid;
-  grid-template-rows: var(--toolbar-height) 1fr var(--console-height);
-  grid-template-columns: var(--left-panel-width) 1fr var(--right-panel-width);
-  grid-template-areas:
-    "toolbar toolbar toolbar"
-    "left    center  right"
-    "bottom  bottom  bottom";
   height: 100%;
 }
 
