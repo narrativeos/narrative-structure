@@ -38,7 +38,7 @@ pub struct TocNode {
 // ---------------------------------------------------------------------------
 
 /// 获取数据库连接
-fn get_conn(state: &tauri::State<'_, ProjectState>) -> Result<std::sync::MutexGuard<'_, Option<Connection>>, String> {
+fn get_conn<'a>(state: &'a tauri::State<'a, ProjectState>) -> Result<std::sync::MutexGuard<'a, Option<Connection>>, String> {
     state.db_conn.lock().map_err(|e| e.to_string())
 }
 

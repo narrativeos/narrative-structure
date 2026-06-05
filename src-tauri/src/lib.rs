@@ -1,5 +1,6 @@
 pub mod project_manager;
 pub mod db_engine;
+pub mod markdown_parser;
 
 use project_manager::ProjectState;
 
@@ -15,6 +16,7 @@ pub fn run() {
             project_manager::open_project,
             project_manager::close_project,
             project_manager::get_project_path,
+            project_manager::import_document,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,

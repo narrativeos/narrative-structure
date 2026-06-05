@@ -111,6 +111,35 @@ function App() {
   }, []);
 
   // =========================================================================
+  // 导入 MinerU 输出 zip
+  // =========================================================================
+  const handleImportDocument = useCallback(async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
+        multiple: false,
+        title: "选择 MinerU 输出 zip 包",
+      });
+
+      if (!selected) return;
+
+      setStatusMsg("正在导入...");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const msg = await invoke<string>("import_document", {
+        zipPath: selected as string,
+      });
+      setStatusMsg(msg);
+
+      // 刷新目录树
+      const toc = await invoke<TocNode[]>("get_toc");
+      setTocTree(toc);
+    } catch (err) {
+      setStatusMsg(`导入失败: ${err}`);
+    }
+  }, []);
+
+  // =========================================================================
   // 目录树 / 编辑器交互
   // =========================================================================
   const handleSelectBlock = useCallback(async (nodeId: string) => {
@@ -195,6 +224,9 @@ function App() {
           </button>
         </div>
         <div className="toolbar-actions">
+          <button className="btn-import" onClick={handleImportDocument} title="导入 MinerU 输出 zip">
+            📥 导入文档
+          </button>
           <span className="status-msg">{statusMsg}</span>
         </div>
       </header>
