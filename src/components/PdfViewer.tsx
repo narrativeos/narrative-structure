@@ -16,7 +16,7 @@ export default function PdfViewer({ projectPath }: PdfViewerProps) {
     invoke<string | null>("find_asset_file", { pattern: "_layout.pdf" })
       .then((found) => {
         if (found) {
-          setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(found)}`);
+          setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(found)}#view=FitH`);
         }
         setLoading(false);
       })
@@ -28,7 +28,6 @@ export default function PdfViewer({ projectPath }: PdfViewerProps) {
 
   return (
     <div className="pdf-viewer">
-      <div className="pdf-toolbar"><span className="pdf-title">📄 PDF 预览</span></div>
       <div className="pdf-content">
         <embed src={pdfUrl} type="application/pdf" className="pdf-embed" />
       </div>
