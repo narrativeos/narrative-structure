@@ -15,6 +15,8 @@ rusqlite = { version = "0.31", features = ["bundled", "vtab"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 zip = "2"
+base64 = "0.22"
+mime_guess = "2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

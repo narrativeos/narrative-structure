@@ -19,6 +19,7 @@ pub fn run() {
             project_manager::import_document,
             project_manager::list_project_files,
             project_manager::find_asset_file,
+            project_manager::read_file_as_data_url,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,

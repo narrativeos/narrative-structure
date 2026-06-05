@@ -23,6 +23,13 @@
       "csp": null
     }
   },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ]
+  },
   "plugins": {
     "shell": {
       "open": true
