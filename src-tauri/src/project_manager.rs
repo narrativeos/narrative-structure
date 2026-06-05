@@ -426,6 +426,39 @@ pub fn import_document(
     ))
 }
 
+/// 查找 assets 目录下匹配模式的文件
+#[tauri::command]
+pub fn find_asset_file(
+    state: tauri::State<'_, ProjectState>,
+    pattern: String,
+) -> Result<Option<String>, String> {
+    let path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
+    let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
+    let assets_dir = project_path.join("assets");
+    if !assets_dir.exists() { return Ok(None); }
+
+    let mut result = None;
+    collect_matching_files(&assets_dir, &assets_dir, &pattern, &mut result);
+    Ok(result)
+}
+
+fn collect_matching_files(base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {
+    if out.is_some() { return; }
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_matching_files(base, &path, pattern, out);
+            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if name.contains(pattern) {
+                    *out = Some(path.display().to_string());
+                    return;
+                }
+            }
+        }
+    }
+}
+
 /// 获取当前项目路径
 #[tauri::command]
 pub fn get_project_path(state: tauri::State<'_, ProjectState>) -> Result<Option<String>, String> {
