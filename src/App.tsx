@@ -38,27 +38,53 @@ function countNodes(node: TocNode): number {
   return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
 }
 
+// ---- 最近项目持久化 ----
+interface RecentProject { name: string; path: string; time: number }
+const RECENT_KEY = "narrative-structure-recent";
+
+function loadRecent(): RecentProject[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); } catch { return []; }
+}
+function saveRecent(list: RecentProject[]) {
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 10)));
+}
+function addRecent(name: string, path: string) {
+  const list = loadRecent().filter(r => r.path !== path);
+  list.unshift({ name, path, time: Date.now() });
+  saveRecent(list);
+}
+
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,"0")}`;
+}
+
 function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string>("");
+  const [projectName, setProjectName] = useState("");
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<Block | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
+  const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
+
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
   const [rightW, bindRight] = useResizable(220, 160, 400);
   const [splitPct, bindSplit] = useResizable(40, 20, 80);
   const [bottomH, bindBottom] = useResizable(140, 60, 400, "y");
+
   // =========================================================================
-  // 加载项目（打开已有项目后调用）
+  // 加载项目
   // =========================================================================
-  const loadProject = useCallback(async (path: string) => {
+  const loadProject = useCallback(async (path: string, name?: string) => {
     try {
       const msg = await invoke<string>("open_project", { path });
+      const pName = name || path.split("/").pop() || path;
       setProjectPath(path);
-      setProjectName(path.split("/").pop() || path);
+      setProjectName(pName);
       setStatusMsg(msg);
-
+      addRecent(pName, path);
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
     } catch (err) {
@@ -97,6 +123,7 @@ function App() {
       setProjectName(name);
       setProjectPath(pathPart.trim());
       setStatusMsg(msg);
+      addRecent(name, pathPart.trim());
 
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
@@ -128,14 +155,13 @@ function App() {
   // 关闭当前项目 → 回到欢迎页
   // =========================================================================
   const handleCloseProject = useCallback(async () => {
-    try {
-      await invoke<string>("close_project");
-    } catch { /* ignore */ }
+    try { await invoke<string>("close_project"); } catch {}
     setProjectPath(null);
     setTocTree([]);
     setActiveBlock(null);
     setStatusMsg("");
-  }, []);
+    refreshRecent();
+  }, [refreshRecent]);
 
   // =========================================================================
   // 导入 MinerU 输出 zip
@@ -222,7 +248,24 @@ function App() {
 
           <div className="welcome-recent">
             <h4>最近打开</h4>
-            <p className="welcome-recent-empty">（暂无历史记录）</p>
+            {recentProjects.length === 0 ? (
+              <p className="welcome-recent-empty">（暂无历史记录）</p>
+            ) : (
+              <div className="recent-list">
+                {recentProjects.map((r) => (
+                  <div
+                    key={r.path}
+                    className="recent-item"
+                    onClick={() => loadProject(r.path, r.name)}
+                    title={r.path}
+                  >
+                    <span className="recent-icon">📁</span>
+                    <span className="recent-name">{r.name}</span>
+                    <span className="recent-time">{fmtTime(r.time)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
