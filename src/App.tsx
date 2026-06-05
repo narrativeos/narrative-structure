@@ -7,6 +7,7 @@ import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
+import LogPanel from "./components/LogPanel";
 import "./App.css";
 
 export interface TocNode {
@@ -242,10 +243,12 @@ function App() {
 
       <aside className="panel-left">
         <div className="panel-section toc-section">
-          <h3>📑 语义目录</h3>
+          <h3>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</h3>
           <TOC nodes={tocTree} onSelect={handleSelectBlock} />
         </div>
-        <FileExplorer projectPath={projectPath} />
+        <div className="panel-section files-section">
+          <FileExplorer projectPath={projectPath} />
+        </div>
       </aside>
 
       <div className="panel-center">
@@ -260,12 +263,18 @@ function App() {
       </div>
 
       <aside className="panel-right">
-        <h3>⚙️ 流程状态</h3>
-        <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
+        <div className="pr-section">
+          <h3>⚙️ 流程管线</h3>
+          <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
+        </div>
+        <div className="pr-section pr-console">
+          <h3>💬 智能对话</h3>
+          <AgentConsole />
+        </div>
       </aside>
 
       <footer className="panel-bottom">
-        <AgentConsole />
+        <LogPanel />
       </footer>
     </div>
   );

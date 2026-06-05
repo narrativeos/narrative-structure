@@ -129,6 +129,13 @@ html, body, #root {
   color: var(--color-text-dim);
   padding: 6px 12px 2px;
   letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+}
+.files-section {
+  border-top: 1px solid var(--color-border);
+  max-height: 30%;
+  overflow-y: auto;
 }
 
 /* ---- 中轴：双栏工作台 ---- */
@@ -163,14 +170,23 @@ html, body, #root {
   background: var(--color-surface);
   border-left: 1px solid var(--color-border);
   overflow-y: auto;
-  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
 }
-.panel-right h3 {
+.pr-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.pr-section h3 {
   font-size: 10px;
   text-transform: uppercase;
   color: var(--color-text-dim);
-  padding-bottom: 6px;
+  padding-bottom: 4px;
   letter-spacing: 0.5px;
+}
+.pr-console {
+  flex: 1;
+  border-bottom: none;
 }
 
 /* ================================================================

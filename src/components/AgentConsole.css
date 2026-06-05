@@ -1,31 +1,28 @@
-.agent-console {
-  border-top: 1px solid var(--color-border);
-  background: var(--color-surface);
-}
-
-.ac-input-row {
+.agent-console-compact {
   display: flex;
-  align-items: center;
-  padding: 6px 12px;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0;
 }
 
-.ac-input {
-  flex: 1;
+.ac-textarea {
   background: rgba(255,255,255,0.06);
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 12px;
+  font-family: inherit;
   outline: none;
+  resize: vertical;
+  min-height: 50px;
 }
 
-.ac-input:focus {
+.ac-textarea:focus {
   border-color: var(--color-accent);
 }
 
-.ac-input::placeholder {
+.ac-textarea::placeholder {
   color: var(--color-text-dim);
 }
 
@@ -34,49 +31,11 @@
   color: #fff;
   border: none;
   border-radius: 4px;
-  padding: 4px 10px;
+  padding: 4px 0;
   cursor: pointer;
   font-size: 12px;
 }
 
 .ac-btn:hover {
   background: var(--color-accent-hover);
-}
-
-.ac-toggle {
-  background: none;
-  border: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  font-size: 10px;
-  padding: 2px 4px;
-}
-
-.ac-log {
-  max-height: 200px;
-  overflow-y: auto;
-  padding: 6px 12px;
-  border-top: 1px solid var(--color-border);
-  font-family: "Cascadia Code", "Fira Code", monospace;
-  font-size: 12px;
-}
-
-.ac-log-entry {
-  padding: 2px 0;
-  display: flex;
-  gap: 8px;
-}
-
-.ac-log-entry.error { color: #e06c75; }
-.ac-log-entry.success { color: #98c379; }
-.ac-log-entry.info { color: var(--color-text-dim); }
-
-.ac-log-time {
-  color: var(--color-text-dim);
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-.ac-log-msg {
-  word-break: break-all;
 }
