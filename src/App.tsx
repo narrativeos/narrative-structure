@@ -28,19 +28,20 @@ export interface Block {
 
 function App() {
   const [projectPath, setProjectPath] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string>("");
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<Block | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
 
   // =========================================================================
-  // 加载项目（打开或新建后调用）
+  // 加载项目（打开已有项目后调用）
   // =========================================================================
   const loadProject = useCallback(async (path: string) => {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
-
       const msg = await invoke<string>("open_project", { path });
       setProjectPath(path);
+      setProjectName(path.split("/").pop() || path);
       setStatusMsg(msg);
 
       const toc = await invoke<TocNode[]>("get_toc");
@@ -51,28 +52,39 @@ function App() {
   }, []);
 
   // =========================================================================
-  // 新建项目
+  // 导入文档 = 新建项目
   // =========================================================================
-  const handleNewProject = useCallback(async () => {
-    const name = window.prompt("输入项目名称:");
-    if (!name?.trim()) return;
-
+  const handleImportNewProject = useCallback(async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const projectsDir = "Projects"; // 默认创建在 Projects/ 下
-      const msg = await invoke<string>("create_project", {
-        parentDir: projectsDir,
-        projectName: name.trim(),
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
+        multiple: false,
+        title: "选择 MinerU 输出 zip 包",
       });
-      // create_project 内部已自动打开，只需同步前端状态
-      const fullPath = `${projectsDir}/${name.trim()}`;
-      setProjectPath(fullPath);
+      if (!selected) return;
+
+      setStatusMsg("正在导入...");
+      const { invoke } = await import("@tauri-apps/api/core");
+      // import_new_project 返回: "<project_name> | <N> 个语义块 | <project_path>"
+      const msg = await invoke<string>("import_new_project", {
+        zip_path: selected as string,
+      });
+
+      // 解析返回消息提取路径和名称
+      const parts = msg.split(" | ");
+      const name = parts[0] || "";
+      const pathPart = parts[2] || "";
+      const displayPath = pathPart.trim();
+
+      setProjectName(name);
+      setProjectPath(displayPath);
       setStatusMsg(msg);
 
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
     } catch (err) {
-      setStatusMsg(`创建失败: ${err}`);
+      setStatusMsg(`导入失败: ${err}`);
     }
   }, []);
 
@@ -127,7 +139,7 @@ function App() {
       setStatusMsg("正在导入...");
       const { invoke } = await import("@tauri-apps/api/core");
       const msg = await invoke<string>("import_document", {
-        zipPath: selected as string,
+        zip_path: selected as string,
       });
       setStatusMsg(msg);
 
@@ -146,7 +158,7 @@ function App() {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const blocks = await invoke<Block[]>("get_blocks", {
-        parentId: nodeId,
+        parent_id: nodeId,
         limit: 50,
         offset: 0,
       });
@@ -165,7 +177,7 @@ function App() {
         const updated = await invoke<Block>("update_block", {
           id: blockId,
           content: newContent,
-          expectedVersion: version,
+          expected_version: version,
         });
         setActiveBlock(updated);
         setStatusMsg("已保存");
@@ -187,15 +199,15 @@ function App() {
           <h1 className="welcome-title">NarrativeStructure</h1>
           <p className="welcome-subtitle">文档智能化重构工作台</p>
           <p className="welcome-desc">
-            以语义块为最小单元，将超大型文档离散化为可操作的知识资产
+            导入 MinerU 输出的 zip 压缩包，自动解析为语义块并构建可编辑的文档树
           </p>
 
           <div className="welcome-actions">
-            <button className="btn btn-primary" onClick={handleNewProject}>
-              ＋ 新建项目
+            <button className="btn btn-primary" onClick={handleImportNewProject}>
+              📥 导入文档开始
             </button>
             <button className="btn btn-secondary" onClick={handleOpenProject}>
-              📂 打开项目
+              📂 打开已有项目
             </button>
           </div>
 
@@ -217,7 +229,7 @@ function App() {
         <h1 className="app-title">NarrativeStructure</h1>
         <div className="toolbar-project">
           <span className="project-path" title={projectPath}>
-            📁 {projectPath}
+            📁 {projectName}
           </span>
           <button className="btn-close" onClick={handleCloseProject} title="关闭项目">
             ✕

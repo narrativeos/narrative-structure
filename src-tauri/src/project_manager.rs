@@ -3,6 +3,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::UNIX_EPOCH;
 
 use crate::markdown_parser::parse_markdown;
 
@@ -58,49 +59,167 @@ impl ProjectState {
     }
 }
 
-/// 新建项目: 创建目录结构 → 初始化 narrative.db → 自动打开
-#[tauri::command]
-pub fn create_project(
-    state: tauri::State<'_, ProjectState>,
-    parent_dir: String,
-    project_name: String,
-) -> Result<String, String> {
-    let project_path = PathBuf::from(&parent_dir).join(&project_name);
+/// 生成时间序列 ID: YYYYMMDD_HHMMSS_<4位随机hex>
+fn timestamp_id() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    // 简单 hash 取后 4 位 hex
+    let suffix = format!("{:08x}", now);
+    let suffix = &suffix[suffix.len().saturating_sub(4)..];
 
-    // 1. 验证不重名
-    if project_path.exists() {
-        return Err(format!("项目已存在: {}", project_path.display()));
+    // 格式化时间
+    use std::time::SystemTime;
+    #[allow(deprecated)]
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let days = secs / 86400;
+    let day_secs = secs % 86400;
+    let hours = day_secs / 3600;
+    let mins = (day_secs % 3600) / 60;
+    let secs_rem = day_secs % 60;
+
+    // 计算年月日 (简化)
+    let (y, m, d) = days_to_ymd(days as i64);
+
+    format!("{:04}{:02}{:02}_{:02}{:02}{:02}_{}", y, m, d, hours, mins, secs_rem, suffix)
+}
+
+/// 简化的 unix epoch days → YMD
+fn days_to_ymd(days: i64) -> (i64, u8, u8) {
+    let d = days;
+    let era: i64 = if d >= 0 { d } else { d - 146096 } / 146097;
+    let doe: u32 = (d - era * 146097) as u32;
+    let yoe: u32 = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y: i64 = yoe as i64 + era * 400;
+    let doy: u32 = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    (y, m as u8, d as u8)
+}
+
+/// 导入 zip 并作为新项目打开
+/// 流程: 解压 → 以时间戳创建项目目录 → 初始化 DB → 解析 MD → 打开项目
+#[tauri::command]
+pub fn import_new_project(
+    state: tauri::State<'_, ProjectState>,
+    zip_path: String,
+) -> Result<String, String> {
+    let zip_file = PathBuf::from(&zip_path);
+    if !zip_file.exists() {
+        return Err(format!("文件不存在: {}", zip_path));
     }
 
-    // 2. 创建目录结构
-    fs::create_dir_all(project_path.join("assets"))
-        .map_err(|e| format!("无法创建 assets 目录: {}", e))?;
-    fs::create_dir_all(project_path.join("nodes"))
-        .map_err(|e| format!("无法创建 nodes 目录: {}", e))?;
-    fs::create_dir_all(project_path.join("prompts"))
-        .map_err(|e| format!("无法创建 prompts 目录: {}", e))?;
+    // 项目名称 = zip 文件名（不含扩展名）
+    let project_name = zip_file
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("untitled");
 
-    // 3. 初始化 narrative.db
-    let db_path = project_path.join("narrative.db");
+    // 项目文件夹 = Projects/<timestamp_id>/
+    let project_id = timestamp_id();
+    let project_dir = PathBuf::from("Projects").join(&project_id);
+
+    fs::create_dir_all(project_dir.join("assets"))
+        .map_err(|e| format!("无法创建目录: {}", e))?;
+    fs::create_dir_all(project_dir.join("nodes"))
+        .map_err(|e| format!("无法创建目录: {}", e))?;
+    fs::create_dir_all(project_dir.join("prompts"))
+        .map_err(|e| format!("无法创建目录: {}", e))?;
+
+    // 解压到 assets/<project_name>/
+    let assets_subdir = project_dir.join("assets").join(project_name);
+    fs::create_dir_all(&assets_subdir)
+        .map_err(|e| format!("无法创建资源目录: {}", e))?;
+
+    let file = fs::File::open(&zip_file)
+        .map_err(|e| format!("无法打开 zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| format!("无法读取 zip: {}", e))?;
+
+    let mut md_content: Option<String> = None;
+
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)
+            .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
+        let entry_name = entry.name().to_string();
+        if entry_name.ends_with('/') {
+            continue;
+        }
+        let file_name = Path::new(&entry_name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&entry_name);
+        let dest_path = assets_subdir.join(file_name);
+
+        // 避免覆盖已有子目录中的同名文件
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+
+        let mut buf = Vec::new();
+        entry.read_to_end(&mut buf)
+            .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
+        fs::write(&dest_path, &buf)
+            .map_err(|e| format!("写入文件失败: {}", e))?;
+
+        if file_name.ends_with(".md") && md_content.is_none() {
+            md_content = Some(String::from_utf8_lossy(&buf).to_string());
+        }
+    }
+
+    // 初始化 narrative.db
+    let db_path = project_dir.join("narrative.db");
     {
         let conn = Connection::open(&db_path)
             .map_err(|e| format!("无法创建数据库: {}", e))?;
-
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
              PRAGMA foreign_keys=ON;
              PRAGMA busy_timeout=5000;",
         )
         .map_err(|e| format!("PRAGMA 设置失败: {}", e))?;
-
         conn.execute_batch(DB_SCHEMA)
             .map_err(|e| format!("建表失败: {}", e))?;
-    } // conn 在此 drop，后续 open_project 会重新打开
 
-    // 4. 自动打开新项目
-    open_project_inner(state, project_path.clone())?;
+        // 解析 Markdown → 写入 blocks
+        if let Some(ref md) = md_content {
+            let parsed = parse_markdown(md);
+            if !parsed.is_empty() {
+                conn.execute("BEGIN", []).map_err(|e| format!("事务失败: {}", e))?;
+                for block in &parsed {
+                    conn.execute(
+                        "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, metadata)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![
+                            block.id, block.parent_id, block.order_idx,
+                            block.level, block.block_type, block.content, block.metadata,
+                        ],
+                    )
+                    .map_err(|e| format!("插入块失败: {}", e))?;
+                }
+                conn.execute("COMMIT", []).map_err(|e| format!("提交失败: {}", e))?;
+            }
+        }
+    }
 
-    Ok(format!("项目已创建并打开: {}", project_path.display()))
+    // 打开项目
+    open_project_inner(state, project_dir.clone())?;
+
+    let block_count = md_content
+        .as_ref()
+        .map(|md| parse_markdown(md).len())
+        .unwrap_or(0);
+
+    Ok(format!(
+        "{} | {} 个语义块 | {}",
+        project_name, block_count, project_dir.display()
+    ))
 }
 
 /// 打开一个项目: 验证路径 → 连接数据库 → 应用 PRAGMA

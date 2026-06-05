@@ -12,7 +12,7 @@ pub fn run() {
         .manage(ProjectState::new())
         .invoke_handler(tauri::generate_handler![
             // project_manager
-            project_manager::create_project,
+            project_manager::import_new_project,
             project_manager::open_project,
             project_manager::close_project,
             project_manager::get_project_path,

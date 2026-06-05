@@ -244,6 +244,37 @@ html, body, #root {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.btn-sm {
+  padding: 6px 16px !important;
+  font-size: 13px !important;
+}
+
+/* ---- 新建项目表单 ---- */
+.new-project-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.new-project-input {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: 14px;
+  outline: none;
+}
+
+.new-project-input::placeholder {
+  color: var(--color-text-dim);
+}
+
+.new-project-buttons {
+  display: flex;
+  gap: 8px;
+}
+
 /* ---- 最近打开 ---- */
 .welcome-recent {
   text-align: left;
