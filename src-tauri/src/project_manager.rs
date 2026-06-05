@@ -59,6 +59,17 @@ impl ProjectState {
     }
 }
 
+/// 获取项目根目录（处理 Tauri 在不同目录运行的情况）
+fn project_root_dir() -> PathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // dev 模式下 cargo run 从 src-tauri/ 运行，需回退一层
+    if cwd.ends_with("src-tauri") {
+        cwd.parent().map(|p| p.to_path_buf()).unwrap_or(cwd)
+    } else {
+        cwd
+    }
+}
+
 /// 生成时间序列 ID: YYYYMMDD_HHMMSS_<4位随机hex>
 fn timestamp_id() -> String {
     let now = SystemTime::now()
@@ -121,9 +132,9 @@ pub fn import_new_project(
         .and_then(|s| s.to_str())
         .unwrap_or("untitled");
 
-    // 项目文件夹 = Projects/<timestamp_id>/
+    // 项目文件夹 = <project_root>/Projects/<timestamp_id>/
     let project_id = timestamp_id();
-    let project_dir = PathBuf::from("Projects").join(&project_id);
+    let project_dir = project_root_dir().join("Projects").join(&project_id);
 
     fs::create_dir_all(project_dir.join("assets"))
         .map_err(|e| format!("无法创建目录: {}", e))?;

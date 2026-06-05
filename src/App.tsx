@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
 import Editor from "./components/Editor";
 import "./App.css";
@@ -38,7 +40,6 @@ function App() {
   // =========================================================================
   const loadProject = useCallback(async (path: string) => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const msg = await invoke<string>("open_project", { path });
       setProjectPath(path);
       setProjectName(path.split("/").pop() || path);
@@ -56,29 +57,31 @@ function App() {
   // =========================================================================
   const handleImportNewProject = useCallback(async () => {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
+      setStatusMsg("正在打开文件选择器...");
       const selected = await open({
         filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
         multiple: false,
         title: "选择 MinerU 输出 zip 包",
       });
-      if (!selected) return;
 
-      setStatusMsg("正在导入...");
-      const { invoke } = await import("@tauri-apps/api/core");
-      // import_new_project 返回: "<project_name> | <N> 个语义块 | <project_path>"
+      if (!selected) {
+        setStatusMsg("已取消选择");
+        return;
+      }
+
+      const zipPath = typeof selected === "string" ? selected : String(selected);
+      setStatusMsg(`正在导入: ${zipPath} ...`);
+
       const msg = await invoke<string>("import_new_project", {
-        zip_path: selected as string,
+        zipPath: zipPath,
       });
 
-      // 解析返回消息提取路径和名称
       const parts = msg.split(" | ");
       const name = parts[0] || "";
       const pathPart = parts[2] || "";
-      const displayPath = pathPart.trim();
 
       setProjectName(name);
-      setProjectPath(displayPath);
+      setProjectPath(pathPart.trim());
       setStatusMsg(msg);
 
       const toc = await invoke<TocNode[]>("get_toc");
@@ -93,7 +96,6 @@ function App() {
   // =========================================================================
   const handleOpenProject = useCallback(async () => {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         directory: true,
         multiple: false,
@@ -113,7 +115,6 @@ function App() {
   // =========================================================================
   const handleCloseProject = useCallback(async () => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       await invoke<string>("close_project");
     } catch { /* ignore */ }
     setProjectPath(null);
@@ -127,7 +128,6 @@ function App() {
   // =========================================================================
   const handleImportDocument = useCallback(async () => {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
         multiple: false,
@@ -137,13 +137,11 @@ function App() {
       if (!selected) return;
 
       setStatusMsg("正在导入...");
-      const { invoke } = await import("@tauri-apps/api/core");
       const msg = await invoke<string>("import_document", {
-        zip_path: selected as string,
+        zipPath: selected as string,
       });
       setStatusMsg(msg);
 
-      // 刷新目录树
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
     } catch (err) {
@@ -156,9 +154,8 @@ function App() {
   // =========================================================================
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
       const blocks = await invoke<Block[]>("get_blocks", {
-        parent_id: nodeId,
+        parentId: nodeId,
         limit: 50,
         offset: 0,
       });
@@ -173,11 +170,10 @@ function App() {
   const handleContentChange = useCallback(
     async (blockId: string, newContent: string, version: number) => {
       try {
-        const { invoke } = await import("@tauri-apps/api/core");
         const updated = await invoke<Block>("update_block", {
           id: blockId,
           content: newContent,
-          expected_version: version,
+          expectedVersion: version,
         });
         setActiveBlock(updated);
         setStatusMsg("已保存");
@@ -203,13 +199,18 @@ function App() {
           </p>
 
           <div className="welcome-actions">
-            <button className="btn btn-primary" onClick={handleImportNewProject}>
+            <button
+              className="btn btn-primary"
+              onClick={() => handleImportNewProject()}
+            >
               📥 导入文档开始
             </button>
             <button className="btn btn-secondary" onClick={handleOpenProject}>
               📂 打开已有项目
             </button>
           </div>
+
+          {statusMsg && <p className="welcome-status">{statusMsg}</p>}
 
           <div className="welcome-recent">
             <h4>最近打开</h4>

@@ -295,3 +295,10 @@ html, body, #root {
   color: var(--color-text-dim);
   opacity: 0.5;
 }
+
+.welcome-status {
+  font-size: 12px;
+  color: var(--color-accent);
+  text-align: center;
+  margin-top: 8px;
+}
