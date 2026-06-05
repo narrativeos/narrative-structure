@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project data (user projects not tracked)
+Projects/*
+!Projects/MyDocument_A/
+Projects/MyDocument_A/narrative.db
+
+# Env
+.env
+.env.local

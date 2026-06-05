@@ -1,0 +1,54 @@
+.toc-tree {
+  font-size: 13px;
+  user-select: none;
+}
+
+.toc-item-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 8px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.toc-item-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.toc-item-row:active {
+  background: rgba(0, 122, 204, 0.2);
+}
+
+.toc-toggle {
+  width: 16px;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.toc-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.toc-toggle.placeholder {
+  visibility: hidden;
+}
+
+.toc-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc-children {
+  /* nested */
+}
+
+.toc-empty {
+  padding: 16px;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  text-align: center;
+}

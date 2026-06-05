@@ -1,0 +1,31 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicktomlin/tauri-docs/main/tauri.conf.json",
+  "productName": "NarrativeStructure",
+  "version": "0.1.0",
+  "identifier": "com.narrativeos.structure",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "NarrativeStructure — 文档智能化重构工作台",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}
