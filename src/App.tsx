@@ -263,18 +263,18 @@ function App() {
       <div className="resize-handle resize-h" style={{ gridArea: "handle-c" }} {...bindLeft()} />
 
       <div className="panel-center">
-        <div className="workbench-split">
+        <div className="workbench-split" id="workbench-split">
           <div className="wb-left" style={{ width: `${splitPct}%` }}>
             <PdfViewer projectPath={projectPath} docName={projectName} />
           </div>
-          <div className="resize-handle resize-h" {...bindSplit()} />
+          <div className="resize-handle resize-h" {...bindSplit({ usePercent: true, getContainerWidth: () => document.getElementById("workbench-split")?.clientWidth ?? 800 })} />
           <div className="wb-right" style={{ flex: 1 }}>
             <BlockEditor block={activeBlock} onChange={handleContentChange} />
           </div>
         </div>
       </div>
 
-      <div className="resize-handle resize-h" style={{ gridArea: "handle-r" }} {...bindRight(true)} />
+      <div className="resize-handle resize-h" style={{ gridArea: "handle-r" }} {...bindRight({ reversed: true })} />
 
       <aside className="panel-right">
         <div className="pr-section">
@@ -287,7 +287,7 @@ function App() {
         </div>
       </aside>
 
-      <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom()} />
+      <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom({ reversed: true })} />
 
       <footer className="panel-bottom">
         <LogPanel />
