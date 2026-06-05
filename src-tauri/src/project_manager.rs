@@ -1,7 +1,6 @@
 use rusqlite::Connection;
 use std::fs;
 use std::io::Read;
-use base64::Engine;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
@@ -441,18 +440,6 @@ pub fn find_asset_file(
     let mut result = None;
     collect_matching_files(&assets_dir, &assets_dir, &pattern, &mut result);
     Ok(result)
-}
-
-/// 读取文件并返回 base64 data URL
-#[tauri::command]
-pub fn read_file_as_data_url(path: String) -> Result<String, String> {
-    use base64::engine::general_purpose::STANDARD;
-    let mut file = fs::File::open(&path).map_err(|e| format!("无法打开: {}", e))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).map_err(|e| format!("读取失败: {}", e))?;
-    let mime = mime_guess::from_path(&path).first_or_octet_stream();
-    let b64 = STANDARD.encode(&buf);
-    Ok(format!("data:{};base64,{}", mime, b64))
 }
 
 fn collect_matching_files(base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {

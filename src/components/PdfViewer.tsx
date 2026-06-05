@@ -7,17 +7,16 @@ interface PdfViewerProps {
 }
 
 export default function PdfViewer({ projectPath }: PdfViewerProps) {
-  const [dataUrl, setDataUrl] = useState<string | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    setDataUrl(null);
+    setPdfUrl(null);
     invoke<string | null>("find_asset_file", { pattern: "_layout.pdf" })
-      .then(async (found) => {
+      .then((found) => {
         if (found) {
-          const url = await invoke<string>("read_file_as_data_url", { path: found });
-          setDataUrl(url);
+          setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(found)}`);
         }
         setLoading(false);
       })
@@ -25,13 +24,13 @@ export default function PdfViewer({ projectPath }: PdfViewerProps) {
   }, [projectPath]);
 
   if (loading) return <div className="pdf-empty">⏳ 加载 PDF...</div>;
-  if (!dataUrl) return <div className="pdf-empty">（未找到 PDF）</div>;
+  if (!pdfUrl) return <div className="pdf-empty">（未找到 PDF）</div>;
 
   return (
     <div className="pdf-viewer">
       <div className="pdf-toolbar"><span className="pdf-title">📄 PDF 预览</span></div>
       <div className="pdf-content">
-        <embed src={dataUrl} type="application/pdf" className="pdf-embed" />
+        <embed src={pdfUrl} type="application/pdf" className="pdf-embed" />
       </div>
     </div>
   );
