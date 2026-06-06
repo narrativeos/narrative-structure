@@ -31,19 +31,18 @@ body{{margin:0;background:#525659}}
 .page-wrap canvas{{display:block;max-width:100%;height:auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
-#legend{{position:fixed;bottom:8px;right:8px;background:rgba(0,0,0,0.7);color:#ccc;padding:4px 8px;border-radius:4px;font-size:10px;z-index:10;display:none;line-height:1.6}}
-.leg-dot{{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}}
+.leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
 </style></head><body>
 <div id="indicator">1 / ?</div>
-<div id="toolbar">
-  <button id="btn-overlay" class="active" onclick="toggleOverlay()" title="显示/隐藏 MinerU 分块信息层">🧩 信息层</button>
-</div>
-<div id="legend" style="display:block">
-  <div><span class="leg-dot" style="background:#ef4444"></span>title 标题</div>
-  <div><span class="leg-dot" style="background:#3b82f6"></span>text 正文</div>
-  <div><span class="leg-dot" style="background:#10b981"></span>equation 公式</div>
-  <div><span class="leg-dot" style="background:#f59e0b"></span>table 表格</div>
-  <div><span class="leg-dot" style="background:#8b5cf6"></span>image 图片</div>
+<div id="toolbar" style="display:flex;align-items:center;gap:4px">
+  <button id="btn-overlay" class="active" onclick="toggleOverlay()" title="显示/隐藏信息层">👁</button>
+  <span style="font-size:10px;color:#999;white-space:nowrap">
+    <span class="leg-dot" style="background:#ef4444"></span>标题
+    <span class="leg-dot" style="background:#3b82f6"></span>正文
+    <span class="leg-dot" style="background:#10b981"></span>公式
+    <span class="leg-dot" style="background:#f59e0b"></span>表格
+    <span class="leg-dot" style="background:#8b5cf6"></span>图片
+  </span>
 </div>
 <div id="viewer"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -63,9 +62,8 @@ let borderMap={{
 function toggleOverlay(){{
   overlayVisible=!overlayVisible;
   var btn=document.getElementById('btn-overlay');
-  var leg=document.getElementById('legend');
-  if(overlayVisible){{btn.classList.add('active');leg.style.display='block';}}
-  else{{btn.classList.remove('active');leg.style.display='none';}}
+  if(overlayVisible){{btn.classList.add('active');}}
+  else{{btn.classList.remove('active');}}
   if(pdfDoc)renderAllPages(pdfDoc);
 }}
 
@@ -99,7 +97,8 @@ renderAllPages(pdf);
 function scrollToPage(num){{
 autoScrolling=true;
 var el=document.getElementById('page-'+num);
-if(el)el.scrollIntoView({{behavior:'smooth',block:'start'}});
+if(el){{el.scrollIntoView({{behavior:'smooth',block:'start'}});}}
+else{{window.scrollTo(0,0);}}
 setTimeout(function(){{autoScrolling=false;}},1000);
 }}
 function renderAllPages(pdf){{
@@ -143,20 +142,22 @@ renderTimer=setTimeout(function(){{renderAllPages(pdfDoc);}},300);
 }}).observe(document.getElementById('viewer'));
 }}
 var observer=new IntersectionObserver(function(entries){{
+var best=null;
 entries.forEach(function(e){{
 if(e.isIntersecting&&!autoScrolling){{
 var id=e.target.id;
 if(id&&id.startsWith('page-')){{
 var p=parseInt(id.replace('page-',''));
-if(p!==currentPage){{
-currentPage=p;
-document.getElementById('indicator').textContent=p+' / '+(pdfDoc?pdfDoc.numPages:'?');
-window.parent.postMessage({{type:'pdf-page',page:p}},'*');
-}}
+if(!best||e.intersectionRatio>best.ratio){{best={{page:p,ratio:e.intersectionRatio}};}}
 }}
 }}
 }});
-}},{{threshold:0.5}});
+if(best&&best.page!==currentPage){{
+currentPage=best.page;
+document.getElementById('indicator').textContent=best.page+' / '+(pdfDoc?pdfDoc.numPages:'?');
+window.parent.postMessage({{type:'pdf-page',page:best.page}},'*');
+}}
+}},{{threshold:[0,0.25,0.5,0.75]}});
 window.addEventListener('message',function(e){{
 if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
 if(e.data&&e.data.type==='middle-data'){{

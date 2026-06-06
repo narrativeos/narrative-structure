@@ -415,23 +415,18 @@ function App() {
 
           <div className="workspace-resize-h" {...bindLeft()} />
 
-          {/* 中间三列：PDF | Block列表 | Markdown编辑器 */}
+          {/* 中间三列：PDF | Block列表 | Markdown编辑器（等宽） */}
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
-              <div className="wb-col" style={{ flex: 1 }}>
+              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
               </div>
-              <div className="workspace-resize-h" />
-              <div className="wb-col" style={{ flex: 1 }}>
+              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} />
               </div>
-              <div className="workspace-resize-h" />
-              <div className="wb-col" style={{ flex: 1.5 }}>
+              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <div className="md-preview-panel">
-                  <div className="md-preview-header">📝 Markdown 预览</div>
-                  <div className="md-preview-body">
-                    <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} />
-                  </div>
+                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} />
                 </div>
               </div>
             </div>
