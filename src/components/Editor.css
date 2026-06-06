@@ -7,31 +7,42 @@
 .editor-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 6px 12px;
+  gap: 6px;
+  padding: 3px 8px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
-  font-size: 12px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .be-block-type {
   background: var(--color-accent);
   color: #fff;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border-radius: 3px;
   font-size: 10px;
   text-transform: uppercase;
 }
 
 .be-block-id,
-.be-block-page,
 .be-block-version {
   color: var(--color-text-dim);
+  font-size: 10px;
 }
 
 .be-block-page {
   color: var(--color-accent);
   font-weight: 600;
+  font-size: 11px;
+}
+
+.be-block-id { margin-left: auto; }
+
+/* ---- 模式按钮（嵌入 header） ---- */
+.editor-header .mode-tab {
+  padding: 1px 6px;
+  font-size: 13px;
+  line-height: 1;
 }
 
 .editor-body {
@@ -39,15 +50,34 @@
   overflow: hidden;
 }
 
-/* ---- 模式切换栏 ---- */
-.editor-mode-bar {
+/* ---- 双栏：左编辑/Diff | 右预览 ---- */
+.editor-split {
+  flex: 1;
   display: flex;
-  gap: 2px;
-  padding: 4px 8px;
-  background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
+  overflow: hidden;
 }
 
+.editor-split-left {
+  flex: 1;
+  min-width: 0;
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.editor-split-right {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.mode-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  opacity: 0.6;
+}
+
+/* ---- 通用的 mode-tab ---- */
 .mode-tab {
   display: flex;
   align-items: center;
@@ -75,9 +105,10 @@
 
 /* ---- Markdown 预览 ---- */
 .editor-preview {
-  flex: 1;
   overflow-y: auto;
   padding: 16px 24px;
+  min-height: 100%;
+}
   background: var(--color-bg);
 }
 

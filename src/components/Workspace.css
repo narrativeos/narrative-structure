@@ -47,18 +47,14 @@
   background: var(--color-accent);
 }
 
-/* PDF + Editor 内部双栏 */
+/* PDF + Editor 三等分 */
 .workbench-split {
   display: flex;
   flex: 1;
   overflow: hidden;
 }
 
-.wb-left {
+.wb-col {
   overflow: hidden;
-}
-
-.wb-right {
-  flex: 1;
-  overflow: hidden;
+  min-width: 0;
 }

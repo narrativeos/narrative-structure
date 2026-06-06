@@ -77,7 +77,7 @@ function App() {
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
   const [rightW, bindRight] = useResizable(220, 160, 400);
-  const [splitPct, bindSplit] = useResizable(40, 20, 80);
+
   const [, bindBottom] = useResizable(140, 60, 400, "y");
 
   // =========================================================================
@@ -347,14 +347,14 @@ function App() {
 
           <div className="workspace-resize-h" {...bindLeft()} />
 
-          {/* 中间：PDF + Editor */}
+          {/* 中间：PDF + Editor（三等分） */}
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
-              <div className="wb-left" style={{ width: `${splitPct}%` }}>
+              <div className="wb-col" style={{ flex: 1 }}>
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
               </div>
-              <div className="workspace-resize-h" {...bindSplit({ usePercent: true, getContainerWidth: () => document.getElementById("workbench-split")?.clientWidth ?? 800 })} />
-              <div className="wb-right" style={{ flex: 1 }}>
+              <div className="workspace-resize-h" />
+              <div className="wb-col" style={{ flex: 2 }}>
                 <BlockEditor block={activeBlock} onChange={handleContentChange} />
               </div>
             </div>

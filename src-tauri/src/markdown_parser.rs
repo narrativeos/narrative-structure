@@ -12,60 +12,30 @@ pub struct ParsedBlock {
     pub metadata: String,
 }
 
-/// 将 Markdown 文本解析为章节级语义块
+/// 将 Markdown 文本按物理行分块
 ///
-/// 每个 `#` 标题定义一个 section，其 content 是从标题行到下一个同级/上级标题之间的
-/// **原始 Markdown**（保留所有格式：HTML 表格、代码块、图片等）。
-///
-/// 层级关系通过栈维护：每个 section 的 parent 是上一级标题对应的 section。
+/// 每一行 = 一个块，order_idx = 行号（跳过 YAML frontmatter 后从0开始）。
+/// 标题行（# 开头）标记为 `heading` 类型并维护 TOC 层级栈，
+/// 空行标记为 `empty`，其余为 `text`。
 pub fn parse_markdown(md_content: &str) -> Vec<ParsedBlock> {
     let lines: Vec<&str> = md_content.lines().collect();
     let mut blocks: Vec<ParsedBlock> = Vec::new();
-    let mut order_counter: i32 = 0;
 
     // 跳过 YAML frontmatter
     let start_idx = skip_frontmatter(&lines);
 
-    // 层级栈: (section_id, level)
+    // 层级栈: (heading_id, level)
     let mut heading_stack: Vec<(String, i32)> = Vec::new();
 
-    let mut i = start_idx;
+    for (line_no, line) in lines.iter().enumerate().skip(start_idx) {
+        let order_idx = (line_no - start_idx) as i32;
+        let trimmed = line.trim();
 
-    // ---- 处理标题之前的内容（如有）→ 作为根 section (level=0) ----
-    if i < lines.len() && !lines[i].starts_with('#') {
-        let mut root_lines: Vec<&str> = Vec::new();
-        while i < lines.len() && !lines[i].starts_with('#') {
-            root_lines.push(lines[i]);
-            i += 1;
-        }
-        let content = root_lines.join("\n").trim().to_string();
-        if !content.is_empty() {
-            blocks.push(ParsedBlock {
-                id: Uuid::new_v4().to_string(),
-                parent_id: None,
-                order_idx: order_counter,
-                level: 0,
-                block_type: "section".to_string(),
-                content,
-                metadata: "{}".to_string(),
-            });
-            order_counter += 1;
-        }
-    }
+        let (block_type, level, parent_id, bid) = if trimmed.starts_with('#') {
+            // ---- 标题行 ----
+            let (mut level, _) = parse_heading(line);
+            level = level.max(1).min(6);
 
-    // ---- 按标题拆分 section ----
-    while i < lines.len() {
-        // 跳过空行
-        if lines[i].trim().is_empty() {
-            i += 1;
-            continue;
-        }
-
-        // 遇到标题 → 开始新 section
-        if lines[i].starts_with('#') {
-            let (level, _title) = parse_heading(lines[i]);
-
-            // 弹出所有 >= 当前 level 的 section
             while let Some((_, l)) = heading_stack.last() {
                 if *l >= level {
                     heading_stack.pop();
@@ -75,38 +45,33 @@ pub fn parse_markdown(md_content: &str) -> Vec<ParsedBlock> {
             }
 
             let parent_id = heading_stack.last().map(|(id, _)| id.clone());
+            let id = Uuid::new_v4().to_string();
+            heading_stack.push((id.clone(), level));
 
-            // 收集从当前标题到下一个标题之间的所有行
-            let mut section_lines: Vec<&str> = Vec::new();
-            section_lines.push(lines[i]); // 包含标题行本身
-            i += 1;
-
-            while i < lines.len() && !lines[i].starts_with('#') {
-                section_lines.push(lines[i]);
-                i += 1;
-            }
-
-            let content = section_lines.join("\n");
-
-            let block = ParsedBlock {
-                id: Uuid::new_v4().to_string(),
-                parent_id,
-                order_idx: order_counter,
-                level,
-                block_type: "section".to_string(),
-                content,
-                metadata: format!("{{\"heading_level\":{}}}", level),
-            };
-
-            let bid = block.id.clone();
-            blocks.push(block);
-            heading_stack.push((bid, level));
-            order_counter += 1;
-            // i 已指向下一个 section 或末尾
+            ("heading".to_string(), level, parent_id, Some(id))
+        } else if trimmed.is_empty() {
+            // ---- 空行 ----
+            let level = heading_stack.len() as i32;
+            let parent_id = heading_stack.last().map(|(id, _)| id.clone());
+            ("empty".to_string(), level, parent_id, None)
         } else {
-            // 非标题行（理论上不会到这里，但作为兜底）
-            i += 1;
-        }
+            // ---- 普通文本行 ----
+            let level = heading_stack.len() as i32;
+            let parent_id = heading_stack.last().map(|(id, _)| id.clone());
+            ("text".to_string(), level, parent_id, None)
+        };
+
+        let id = bid.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        blocks.push(ParsedBlock {
+            id,
+            parent_id,
+            order_idx,
+            level,
+            block_type,
+            content: line.to_string(), // 保留原始行内容
+            metadata: "{}".to_string(),
+        });
     }
 
     blocks
@@ -154,33 +119,37 @@ mod tests {
     fn test_section_parsing() {
         let md = "# Ch1\n\nSome text.\n\n## Ch1.1\n\nMore text.\n\n# Ch2\n\nCh2 text.";
         let blocks = parse_markdown(md);
-        // 3 sections: Ch1, Ch1.1(child), Ch2
-        assert_eq!(blocks.len(), 3);
+        // 11 行（含空行）
+        assert_eq!(blocks.len(), 11);
+        assert_eq!(blocks[0].block_type, "heading"); // # Ch1
         assert_eq!(blocks[0].level, 1);
-        assert!(blocks[0].content.contains("Ch1"));
-        assert!(blocks[0].content.contains("Some text"));
-        assert_eq!(blocks[1].level, 2);
-        assert_eq!(blocks[1].parent_id.as_ref(), Some(&blocks[0].id));
-        assert_eq!(blocks[2].level, 1);
-        assert!(blocks[2].content.contains("Ch2"));
+        assert_eq!(blocks[4].block_type, "heading"); // ## Ch1.1
+        assert_eq!(blocks[4].level, 2);
+        assert_eq!(blocks[4].parent_id.as_ref(), Some(&blocks[0].id));
+        assert_eq!(blocks[8].block_type, "heading"); // # Ch2
+        assert_eq!(blocks[8].level, 1);
+        assert!(blocks[8].parent_id.is_none());
     }
 
     #[test]
     fn test_section_hierarchy() {
         let md = "# H1\n\n## H2\n\n### H3\n\nText under H3.\n\n## H2.2\n\nMore.";
         let blocks = parse_markdown(md);
-        assert_eq!(blocks.len(), 4);
-        assert_eq!(blocks[1].parent_id.as_ref(), Some(&blocks[0].id));
-        assert_eq!(blocks[2].parent_id.as_ref(), Some(&blocks[1].id));
-        assert_eq!(blocks[3].parent_id.as_ref(), Some(&blocks[0].id));
+        assert_eq!(blocks[0].block_type, "heading"); // # H1
+        assert_eq!(blocks[2].block_type, "heading"); // ## H2
+        assert_eq!(blocks[2].parent_id.as_ref(), Some(&blocks[0].id));
+        assert_eq!(blocks[4].block_type, "heading"); // ### H3
+        assert_eq!(blocks[4].parent_id.as_ref(), Some(&blocks[2].id));
+        assert_eq!(blocks[8].block_type, "heading"); // ## H2.2
+        assert_eq!(blocks[8].parent_id.as_ref(), Some(&blocks[0].id));
     }
 
     #[test]
     fn test_preserves_html_tables() {
         let md = "# Catalog\n\n<table><tr><td>Chap 1</td></tr></table>\n\nSome text.";
         let blocks = parse_markdown(md);
-        assert_eq!(blocks.len(), 1);
-        assert!(blocks[0].content.contains("<table>"));
-        assert!(blocks[0].content.contains("</table>"));
+        // HTML table 行原样保留
+        let table_line = blocks.iter().find(|b| b.content.contains("<table>"));
+        assert!(table_line.is_some());
     }
 }

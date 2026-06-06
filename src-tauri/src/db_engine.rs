@@ -86,7 +86,7 @@ pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, St
             "SELECT id, parent_id, order_idx, level, block_type,
                     substr(content, 1, 80) as content_preview
              FROM blocks
-             WHERE block_type = 'section'
+             WHERE block_type = 'heading'
              ORDER BY level, order_idx",
         )
         .map_err(|e| e.to_string())?;
