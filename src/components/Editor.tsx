@@ -13,11 +13,12 @@ interface EditorProps {
   block: Block | null;
   pageBlocks: Block[] | null;
   onChange: (blockId: string, content: string, version: number) => void;
+  onHoverBlock?: (block: Block | null) => void;
 }
 
 const DEBOUNCE_MS = 800;
 
-export default function BlockEditor({ block, pageBlocks, onChange }: EditorProps) {
+export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock }: EditorProps) {
   const [leftMode, setLeftMode] = useState<LeftMode>("edit");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versionRef = useRef(0);
@@ -87,7 +88,9 @@ export default function BlockEditor({ block, pageBlocks, onChange }: EditorProps
             <div key={gi} className="page-group">
               <div className="page-group-header">— p{g.page} —</div>
               {g.blocks.map((b) => (
-                <div key={b.id} className={`page-block-row ${b.block_type}`}>
+                <div key={b.id} className={`page-block-row ${b.block_type}`}
+                  onMouseEnter={() => onHoverBlock?.(b)}
+                  onMouseLeave={() => onHoverBlock?.(null)}>
                   <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
                   <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
                 </div>

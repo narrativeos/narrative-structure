@@ -58,6 +58,7 @@ let borderMap={{
   title:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',
   table:'#f59e0b',image:'#8b5cf6'
 }};
+let highlightedTexts=null;
 
 function toggleOverlay(){{
   overlayVisible=!overlayVisible;
@@ -87,6 +88,49 @@ function drawOverlay(canvas,pageNum,viewportScale){{
       ctx.fillText(b.type,x+2,y+11);
     }}
   }});
+  drawHighlight(ctx,page,sx,sy,pageNum);
+}}
+
+function drawHighlight(ctx,page,sx,sy,pageNum){{
+if(!highlightedTexts||!highlightedTexts.length||!page||!page.para_blocks)return;
+if(pageNum!==currentPage)return;
+var pb,i,j,k,hc,sc,sb,hx,hy,hw,hh;
+for(i=0;i<page.para_blocks.length;i++){{
+pb=page.para_blocks[i];if(!pb.lines)continue;
+for(j=0;j<pb.lines.length;j++){{
+var l=pb.lines[j];if(!l.spans)continue;
+for(k=0;k<l.spans.length;k++){{
+var s=l.spans[k];sc=(s.content||'').replace(/\\s+/g,'');
+for(var hi=0;hi<highlightedTexts.length;hi++){{
+hc=highlightedTexts[hi].replace(/\\s+/g,'');
+if(sc&&hc&&sc.length>2&&hc.length>2&&(sc.indexOf(hc)>=0||hc.indexOf(sc)>=0)){{
+sb=s.bbox||[0,0,0,0];
+hx=sb[0]*sx;hy=sb[1]*sy;hw=(sb[2]-sb[0])*sx;hh=(sb[3]-sb[1])*sy;
+ctx.strokeStyle='#fbbf24';ctx.lineWidth=2.5;
+ctx.strokeRect(hx-1,hy-1,hw+2,hh+2);
+ctx.fillStyle='rgba(251,191,36,0.25)';
+ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
+}}
+}}
+}}
+}}
+}}
+}}
+
+function reRenderOverlay(){{
+if(!middleData)return;
+var wraps=document.querySelectorAll('.page-wrap');
+for(var wi=0;wi<wraps.length;wi++){{
+var w=wraps[wi],ov=w.querySelector('.overlay');
+if(!ov)continue;
+var pn=parseInt(w.id.replace('page-',''));
+var pg=middleData[pn-1];
+if(!pg||!pg.page_size)continue;
+var s=ov.width/pg.page_size[0];
+var ctx=ov.getContext('2d');
+ctx.clearRect(0,0,ov.width,ov.height);
+drawOverlay(ov,pn,s);
+}}
 }}
 
 pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
@@ -175,6 +219,14 @@ if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
 if(e.data&&e.data.type==='middle-data'){{
 middleData=e.data.data;
 if(pdfDoc)renderAllPages(pdfDoc);
+}}
+if(e.data&&e.data.type==='highlight-bbox'){{
+highlightedTexts=e.data.texts||null;
+reRenderOverlay();
+}}
+if(e.data&&e.data.type==='clear-highlight'){{
+highlightedTexts=null;
+reRenderOverlay();
 }}
 }});
 </script></body></html>"#,

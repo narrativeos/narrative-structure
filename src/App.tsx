@@ -422,7 +422,16 @@ function App() {
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} />
+                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange}
+                  onHoverBlock={(b) => {
+                    const iframe = pdfIframeRef.current?.contentWindow;
+                    if (b && b.block_type !== 'empty' && b.content.trim()) {
+                      iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
+                    } else {
+                      iframe?.postMessage({ type: "clear-highlight" }, "*");
+                    }
+                  }}
+                />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <div className="md-preview-panel">
