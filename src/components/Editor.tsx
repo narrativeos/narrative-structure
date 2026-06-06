@@ -88,7 +88,7 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock 
             <div key={gi} className="page-group">
               <div className="page-group-header">— p{g.page} —</div>
               {g.blocks.map((b) => (
-                <div key={b.id} className={`page-block-row ${b.block_type}`}
+                <div key={b.id} className={`page-block-row ${b.block_type}`} data-block-id={b.id}
                   onMouseEnter={() => onHoverBlock?.(b)}
                   onMouseLeave={() => onHoverBlock?.(null)}>
                   <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -76,9 +76,105 @@ function App() {
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
   const [projectKey, setProjectKey] = useState(0);
   const pdfIframeRef = useRef<HTMLIFrameElement>(null);
-  const [lines, _setLines] = useState<LineDef[]>([]);
+  const [lines, setLines] = useState<LineDef[]>([]);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importLogs, setImportLogs] = useState<string[]>([]);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const flyDataRef = useRef<{ bboxes: any[]; wsRect: DOMRect; iframeRect: DOMRect } | null>(null);
+
+  // pageBlocks 变化 → 等 DOM 渲染后批量请求 bbox，画所有飞线
+  useEffect(() => {
+    if (!pageBlocks?.length) { setLines([]); return; }
+    const iframe = pdfIframeRef.current?.contentWindow;
+    if (!iframe) return;
+
+    const timer = setTimeout(() => {
+      const wsRect = workspaceRef.current?.getBoundingClientRect();
+      const iframeRect = pdfIframeRef.current?.getBoundingClientRect();
+      if (!wsRect || !iframeRect) return;
+
+      const rows: { id: string; content: string; page: number; rect: DOMRect }[] = [];
+      document.querySelectorAll('[data-block-id]').forEach(el => {
+        const id = el.getAttribute('data-block-id')!;
+        const block = pageBlocks!.find(b => b.id === id);
+        if (block && block.block_type !== 'empty' && block.content.trim()) {
+          rows.push({ id, content: block.content, page: 1, rect: el.getBoundingClientRect() });
+          try { rows[rows.length-1].page = JSON.parse(block.metadata || "{}").page || 1; } catch {}
+        }
+      });
+      if (!rows.length) return;
+
+      const pageMap = new Map<number, string[]>();
+      rows.forEach(r => {
+        if (!pageMap.has(r.page)) pageMap.set(r.page, []);
+        pageMap.get(r.page)!.push(r.content);
+      });
+
+      (window as any).__flyRows = rows;
+      (window as any).__flyWsRect = wsRect;
+      (window as any).__flyIframeRect = iframeRect;
+
+      pageMap.forEach((texts, page) => {
+        iframe.postMessage({ type: "get-bbox-pos", page, texts }, "*");
+      });
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [pageBlocks]);
+
+  // 接收 bbox-pos → 存储数据 + 批量画线
+  useEffect(() => {
+    let scrollEl: Element | null = null;
+
+    const drawLines = () => {
+      const data = flyDataRef.current;
+      if (!data) return;
+      const { bboxes, wsRect, iframeRect } = data;
+      const rows: { id: string; rect: DOMRect }[] = [];
+      document.querySelectorAll('[data-block-id]').forEach(el => {
+        rows.push({ id: el.getAttribute('data-block-id')!, rect: el.getBoundingClientRect() });
+      });
+      const newLines: LineDef[] = [];
+      bboxes.forEach((bb: any) => {
+        const row = rows.find(r => r.id === bb._blockId);
+        if (!row) return;
+        newLines.push({
+          id: `line-${row.id}`,
+          x1: row.rect.left - wsRect.left,
+          y1: row.rect.top + row.rect.height / 2 - wsRect.top,
+          x2: iframeRect.left + bb.x + bb.w - wsRect.left,
+          y2: iframeRect.top + bb.y + bb.h / 2 - wsRect.top,
+          color: '#fbbf24', active: true,
+        });
+      });
+      setLines(newLines);
+    };
+
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
+      const rows: any[] = (window as any).__flyRows || [];
+      const wsRect: DOMRect = (window as any).__flyWsRect;
+      const iframeRect: DOMRect = (window as any).__flyIframeRect;
+      if (!rows.length || !wsRect || !iframeRect) return;
+
+      // 给每个 bbox 标记对应的 block ID
+      const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({
+        ...bb, _blockId: rows[bi]?.id || ''
+      }));
+      flyDataRef.current = { bboxes, wsRect, iframeRect };
+      drawLines();
+
+      // 绑定 block 列表滚动事件
+      if (!scrollEl) {
+        scrollEl = document.querySelector('.page-blocks-list');
+        if (scrollEl) scrollEl.addEventListener('scroll', drawLines, { passive: true });
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => {
+      window.removeEventListener('message', handler);
+      if (scrollEl) scrollEl.removeEventListener('scroll', drawLines);
+    };
+  }, []);
 
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
@@ -247,8 +343,9 @@ function App() {
     }
   }, []);
 
-  // PDF 翻页 → 加载当前页 ±1 页所有行块
+  // PDF 翻页 → 加载当前页 ±1 页所有行块，清除飞线
   const handlePageChange = useCallback(async (page: number) => {
+    setLines([]);
     try {
       const blocks = await invoke<Block[]>("get_blocks_by_page", {
         pageStart: Math.max(1, page - 1),
@@ -401,7 +498,7 @@ function App() {
       </header>
 
       <div style={{ gridArea: "main", overflow: "hidden" }}>
-        <Workspace>
+        <Workspace ref={workspaceRef}>
           {/* 左侧：TOC + 文件资产 */}
           <div className="workspace-left" style={{ width: leftW }}>
             <div className="toc-section">

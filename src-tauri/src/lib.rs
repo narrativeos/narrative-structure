@@ -228,6 +228,33 @@ if(e.data&&e.data.type==='clear-highlight'){{
 highlightedTexts=null;
 reRenderOverlay();
 }}
+if(e.data&&e.data.type==='get-bbox-pos'){{
+var pgEl=document.getElementById('page-'+e.data.page);
+if(!pgEl||!middleData)return;
+var pd=middleData[e.data.page-1];
+if(!pd||!pd.page_size)return;
+var pr=pgEl.getBoundingClientRect();
+var pw=pd.page_size[0],ph=pd.page_size[1];
+var results=[],bi,li,si,ti,b,sc,tc;
+for(bi=0;bi<(pd.para_blocks||[]).length;bi++){{
+var pb=pd.para_blocks[bi];
+for(li=0;li<(pb.lines||[]).length;li++){{
+var l=pb.lines[li];
+for(si=0;si<(l.spans||[]).length;si++){{
+var s=l.spans[si];sc=(s.content||'').replace(/\\s+/g,'');
+for(ti=0;ti<(e.data.texts||[]).length;ti++){{
+tc=e.data.texts[ti].replace(/\\s+/g,'');
+if(sc&&tc&&sc.length>2&&tc.length>2&&(sc.indexOf(tc)>=0||tc.indexOf(sc)>=0)){{
+b=s.bbox||[0,0,0,0];
+results.push({{x:b[0]/pw*pr.width+pr.left,y:b[1]/ph*pr.height+pr.top,w:(b[2]-b[0])/pw*pr.width,h:(b[3]-b[1])/ph*pr.height}});
+break;
+}}
+}}
+}}
+}}
+}}
+window.parent.postMessage({{type:'bbox-pos',page:e.data.page,bboxes:results}},'*');
+}}
 }});
 </script></body></html>"#,
             pdf_url = format!("narrativestructure://localhost/{}?raw=1", path_str)
