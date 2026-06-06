@@ -365,3 +365,26 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* ---- 页码分组 Card ---- */
+.page-group {
+  margin: 4px 0 8px;
+  background: var(--color-panel, #2d2d2d);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  overflow: hidden;
+}
+
+.page-group-header {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  text-align: right;
+  padding: 2px 8px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.page-group .page-block-row:last-child {
+  border-bottom: none;
+}

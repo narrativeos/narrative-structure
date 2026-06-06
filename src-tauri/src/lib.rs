@@ -141,23 +141,35 @@ renderTimer=setTimeout(function(){{renderAllPages(pdfDoc);}},300);
 }}
 }}).observe(document.getElementById('viewer'));
 }}
-var observer=new IntersectionObserver(function(entries){{
-var best=null;
-entries.forEach(function(e){{
-if(e.isIntersecting&&!autoScrolling){{
-var id=e.target.id;
+function detectCurrentPage(){{
+if(autoScrolling)return;
+var pages=document.querySelectorAll('.page-wrap');
+var best=null, bestDist=Infinity;
+var vh=window.innerHeight;
+pages.forEach(function(el){{
+var rect=el.getBoundingClientRect();
+// 找 top 最接近视口顶部 20% 位置的页面
+var target=vh*0.2;
+var dist=Math.abs(rect.top-target);
+if(dist<bestDist){{bestDist=dist;best=el;}}
+}});
+if(best){{
+var id=best.id;
 if(id&&id.startsWith('page-')){{
 var p=parseInt(id.replace('page-',''));
-if(!best||e.intersectionRatio>best.ratio){{best={{page:p,ratio:e.intersectionRatio}};}}
+if(p!==currentPage){{
+currentPage=p;
+document.getElementById('indicator').textContent=p+' / '+(pdfDoc?pdfDoc.numPages:'?');
+window.parent.postMessage({{type:'pdf-page',page:p}},'*');
 }}
 }}
-}});
-if(best&&best.page!==currentPage){{
-currentPage=best.page;
-document.getElementById('indicator').textContent=best.page+' / '+(pdfDoc?pdfDoc.numPages:'?');
-window.parent.postMessage({{type:'pdf-page',page:best.page}},'*');
 }}
-}},{{threshold:[0,0.25,0.5,0.75]}});
+}}
+var scrollTimer=null;
+window.addEventListener('scroll',function(){{
+clearTimeout(scrollTimer);
+scrollTimer=setTimeout(detectCurrentPage,80);
+}},{{passive:true}});
 window.addEventListener('message',function(e){{
 if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
 if(e.data&&e.data.type==='middle-data'){{
@@ -165,9 +177,6 @@ middleData=e.data.data;
 if(pdfDoc)renderAllPages(pdfDoc);
 }}
 }});
-var checkTimer=setInterval(function(){{
-document.querySelectorAll('.page-wrap').forEach(function(w){{observer.observe(w);}});
-}},500);
 </script></body></html>"#,
             pdf_url = format!("narrativestructure://localhost/{}?raw=1", path_str)
         );

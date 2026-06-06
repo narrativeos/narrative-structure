@@ -61,24 +61,37 @@ export default function BlockEditor({ block, pageBlocks, onChange }: EditorProps
     );
   }
 
-  // 页面模式：显示当前页所有行块
+  // 页面模式：按页码分组显示
   if (pageBlocks && pageBlocks.length > 0 && !block) {
+    // 按 page 分组
+    const groups: { page: number; blocks: Block[] }[] = [];
+    for (const b of pageBlocks) {
+      let p = 0;
+      try { p = JSON.parse(b.metadata || "{}").page || 0; } catch {}
+      const last = groups[groups.length - 1];
+      if (last && last.page === p) {
+        last.blocks.push(b);
+      } else {
+        groups.push({ page: p, blocks: [b] });
+      }
+    }
+
     return (
       <div className="block-editor page-mode">
         <div className="editor-header">
           <span className="be-block-type">📄 页面内容</span>
-          <span className="be-block-page">
-            {(() => {
-              try { const meta = JSON.parse(pageBlocks[0]?.metadata || "{}"); return meta.page ? `p${meta.page}` : ""; } catch { return ""; }
-            })()}
-          </span>
-          <span className="editor-header-count">{pageBlocks.length} 行</span>
+          <span className="editor-header-count">{pageBlocks.length} 行 · {groups.length} 页</span>
         </div>
         <div className="page-blocks-list">
-          {pageBlocks.map((b) => (
-            <div key={b.id} className={`page-block-row ${b.block_type}`}>
-              <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
-              <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
+          {groups.map((g, gi) => (
+            <div key={gi} className="page-group">
+              <div className="page-group-header">— p{g.page} —</div>
+              {g.blocks.map((b) => (
+                <div key={b.id} className={`page-block-row ${b.block_type}`}>
+                  <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
+                  <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>

@@ -247,16 +247,16 @@ function App() {
     }
   }, []);
 
-  // PDF 翻页 → 加载当前页所有行块
+  // PDF 翻页 → 加载当前页 ±1 页所有行块
   const handlePageChange = useCallback(async (page: number) => {
     try {
       const blocks = await invoke<Block[]>("get_blocks_by_page", {
-        pageStart: page,
-        pageEnd: page,
+        pageStart: Math.max(1, page - 1),
+        pageEnd: page + 1,
       });
       if (blocks.length > 0) {
         setPageBlocks(blocks);
-        setActiveBlock(null); // 清除单块选中，进入页面模式
+        setActiveBlock(null);
       }
     } catch {
       // 回退：用 order_idx 估算
