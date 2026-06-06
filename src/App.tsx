@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
+import MarkdownPreview from "./components/MarkdownPreview";
 import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
@@ -69,6 +70,7 @@ function App() {
   const [projectName, setProjectName] = useState("");
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<Block | null>(null);
+  const [pageBlocks, setPageBlocks] = useState<Block[] | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
@@ -245,19 +247,22 @@ function App() {
     }
   }, []);
 
-  // PDF 翻页 → 按页码范围智能加载（当前页 ±2 页）
+  // PDF 翻页 → 加载当前页所有行块
   const handlePageChange = useCallback(async (page: number) => {
     try {
       const blocks = await invoke<Block[]>("get_blocks_by_page", {
         pageStart: page,
-        pageEnd: page + 2,
+        pageEnd: page,
       });
-      if (blocks.length > 0) setActiveBlock(blocks[0]);
+      if (blocks.length > 0) {
+        setPageBlocks(blocks);
+        setActiveBlock(null); // 清除单块选中，进入页面模式
+      }
     } catch {
-      // 回退
+      // 回退：用 order_idx 估算
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
-        if (blocks.length > 0) setActiveBlock(blocks[0]);
+        if (blocks.length > 0) setPageBlocks(blocks);
       } catch {}
     }
   }, []);
@@ -267,26 +272,21 @@ function App() {
       if (blocks.length === 0) return;
       const head = blocks[0];
       setActiveBlock(head);
+      setPageBlocks(null); // 切换到单块模式
 
-      // 从 metadata 中提取精确页码，回退到 order_idx 估算
+      // 用 metadata.page 精确跳转 PDF
       let targetPage = 0;
       try {
         const meta = JSON.parse(head.metadata || "{}");
-        if (meta.page) {
-          targetPage = meta.page as number;
-        }
+        if (meta.page) targetPage = meta.page as number;
       } catch {}
-      if (!targetPage) {
-        const totalBlocks = tocTree.reduce((s, n) => s + countNodes(n), 0);
-        targetPage = Math.max(1, Math.ceil((head.order_idx / Math.max(totalBlocks, 1)) * 1129));
-      }
       if (targetPage > 0) {
         pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: targetPage }, "*");
       }
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
     }
-  }, [tocTree]);
+  }, []);
 
   const handleContentChange = useCallback(
     async (blockId: string, newContent: string, version: number) => {
@@ -415,15 +415,24 @@ function App() {
 
           <div className="workspace-resize-h" {...bindLeft()} />
 
-          {/* 中间：PDF + Editor（三等分） */}
+          {/* 中间三列：PDF | Block列表 | Markdown编辑器 */}
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
               <div className="wb-col" style={{ flex: 1 }}>
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
               </div>
               <div className="workspace-resize-h" />
-              <div className="wb-col" style={{ flex: 2 }}>
-                <BlockEditor block={activeBlock} onChange={handleContentChange} />
+              <div className="wb-col" style={{ flex: 1 }}>
+                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} />
+              </div>
+              <div className="workspace-resize-h" />
+              <div className="wb-col" style={{ flex: 1.5 }}>
+                <div className="md-preview-panel">
+                  <div className="md-preview-header">📝 Markdown 预览</div>
+                  <div className="md-preview-body">
+                    <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} />
+                  </div>
+                </div>
               </div>
             </div>
           </div>

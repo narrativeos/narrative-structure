@@ -11,12 +11,13 @@ type LeftMode = "edit" | "diff";
 
 interface EditorProps {
   block: Block | null;
+  pageBlocks: Block[] | null;
   onChange: (blockId: string, content: string, version: number) => void;
 }
 
 const DEBOUNCE_MS = 800;
 
-export default function BlockEditor({ block, onChange }: EditorProps) {
+export default function BlockEditor({ block, pageBlocks, onChange }: EditorProps) {
   const [leftMode, setLeftMode] = useState<LeftMode>("edit");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versionRef = useRef(0);
@@ -50,16 +51,43 @@ export default function BlockEditor({ block, onChange }: EditorProps) {
     return diffLines(block.original_content, editRef.current);
   }, [leftMode, block, editRef.current]);
 
-  if (!block) {
+  if (!block && !pageBlocks?.length) {
     return (
       <div className="editor-empty">
         <div className="editor-empty-icon">📝</div>
         <p>选择一个块开始编辑</p>
-        <p className="editor-empty-hint">在左侧目录树中点击任意标题</p>
+        <p className="editor-empty-hint">在左侧目录树中点击任意标题，或滚动 PDF</p>
       </div>
     );
   }
 
+  // 页面模式：显示当前页所有行块
+  if (pageBlocks && pageBlocks.length > 0 && !block) {
+    return (
+      <div className="block-editor page-mode">
+        <div className="editor-header">
+          <span className="be-block-type">📄 页面内容</span>
+          <span className="be-block-page">
+            {(() => {
+              try { const meta = JSON.parse(pageBlocks[0]?.metadata || "{}"); return meta.page ? `p${meta.page}` : ""; } catch { return ""; }
+            })()}
+          </span>
+          <span className="editor-header-count">{pageBlocks.length} 行</span>
+        </div>
+        <div className="page-blocks-list">
+          {pageBlocks.map((b) => (
+            <div key={b.id} className={`page-block-row ${b.block_type}`}>
+              <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
+              <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // 单块模式（此时 block 不为 null，已在前面两个 early return 后）
+  if (!block) return null;
   const pageMeta = (() => {
     try {
       const meta = JSON.parse(block.metadata || "{}");
