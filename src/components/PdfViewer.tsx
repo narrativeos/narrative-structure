@@ -1,49 +1,85 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, forwardRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./PdfViewer.css";
 
 interface PdfViewerProps {
   projectPath: string;
+  onPageChange?: (page: number) => void;
 }
 
-export default function PdfViewer({ projectPath }: PdfViewerProps) {
+const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
+  function PdfViewer({ projectPath, onPageChange }, ref) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
+  // 合并外部 ref 和内部 ref
+  const setRef = useCallback((el: HTMLIFrameElement | null) => {
+    (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = el;
+    if (typeof ref === "function") ref(el);
+    else if (ref) (ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el;
+  }, [ref]);
+
+  // 加载 PDF + _middle.json 数据
   useEffect(() => {
     setLoading(true);
     setPdfUrl(null);
-    invoke<string | null>("find_asset_file", { pattern: "_layout.pdf" })
-      .then((found) => {
-        if (found) {
-          const url = `narrativestructure://localhost/${encodeURIComponent(found)}?t=${Date.now()}#view=FitH`;
-          console.log("PDF URL:", url);
-          setPdfUrl(url);
-        }
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
+    Promise.all([
+      invoke<string | null>("find_asset_file", { pattern: "_origin.pdf" }),
+      invoke<string | null>("find_asset_file", { pattern: "_middle.json" }),
+    ]).then(([pdfPath, middlePath]) => {
+      if (pdfPath) setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(pdfPath)}?t=${Date.now()}`);
+      // 存储 middle.json 路径，等 iframe 加载后发送
+      if (middlePath) {
+        (window as any).__middleJsonPath = middlePath;
+      }
+      setLoading(false);
+    }).catch(() => setLoading(false));
   }, [projectPath]);
+
+  // 监听 iframe 加载完成 → 发送 _middle.json 数据
+  useEffect(() => {
+    if (!pdfUrl) return;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const onLoad = () => {
+      const middlePath = (window as any).__middleJsonPath;
+      if (!middlePath) return;
+
+      // 通过 narrativestructure 协议读取 _middle.json
+      const url = `narrativestructure://localhost/${encodeURIComponent(middlePath)}?raw=1`;
+      fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          iframe.contentWindow?.postMessage({ type: "middle-data", data: data.pdf_info }, "*");
+        })
+        .catch(() => {});
+    };
+
+    iframe.addEventListener("load", onLoad);
+    return () => iframe.removeEventListener("load", onLoad);
+  }, [pdfUrl]);
+
+  // 监听 PDF 翻页事件
+  useEffect(() => {
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === "pdf-page") onPageChange?.(e.data.page);
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [onPageChange]);
 
   if (loading) return <div className="pdf-empty">⏳ 加载 PDF...</div>;
   if (!pdfUrl) return <div className="pdf-empty">（未找到 PDF）</div>;
 
   return (
     <div className="pdf-viewer">
-      <button
-        className="pdf-fit-btn"
-        title="恢复全宽"
-        onClick={() => {
-          // force reload with FitH
-          const base = pdfUrl!.split("#")[0].split("?")[0];
-          setPdfUrl(`${base}?t=${Date.now()}#view=FitH`);
-        }}
-      >
-        ↔
-      </button>
       <div className="pdf-content">
-        <iframe src={pdfUrl} className="pdf-embed" title="PDF Preview" />
+        <iframe ref={setRef} src={pdfUrl} className="pdf-embed" title="PDF Preview" />
       </div>
     </div>
   );
-}
+});
+
+export default PdfViewer;

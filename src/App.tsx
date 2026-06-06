@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
@@ -8,6 +8,8 @@ import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
 import LogPanel from "./components/LogPanel";
+import Workspace from "./components/Workspace";
+import LinesLayer, { LineDef } from "./components/LinesLayer";
 import { useResizable } from "./hooks/useResizable";
 import "./App.css";
 
@@ -28,6 +30,7 @@ export interface Block {
   level: number;
   block_type: string;
   content: string;
+  original_content: string;
   metadata: string;
   version: number;
   created_at: string;
@@ -68,12 +71,14 @@ function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
   const [projectKey, setProjectKey] = useState(0);
+  const pdfIframeRef = useRef<HTMLIFrameElement>(null);
+  const [lines, _setLines] = useState<LineDef[]>([]);
 
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
   const [rightW, bindRight] = useResizable(220, 160, 400);
   const [splitPct, bindSplit] = useResizable(40, 20, 80);
-  const [bottomH, bindBottom] = useResizable(140, 60, 400, "y");
+  const [, bindBottom] = useResizable(140, 60, 400, "y");
 
   // =========================================================================
   // 加载项目
@@ -192,17 +197,48 @@ function App() {
     }
   }, []);
 
-  // =========================================================================
-  // 目录树 / 编辑器交互
-  // =========================================================================
+  // PDF 翻页 → 按页码范围智能加载（当前页 ±2 页）
+  const handlePageChange = useCallback(async (page: number) => {
+    try {
+      const blocks = await invoke<Block[]>("get_blocks_by_page", {
+        pageStart: page,
+        pageEnd: page + 2,
+      });
+      if (blocks.length > 0) setActiveBlock(blocks[0]);
+    } catch {
+      // 回退
+      try {
+        const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
+        if (blocks.length > 0) setActiveBlock(blocks[0]);
+      } catch {}
+    }
+  }, []);
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
-      const block = await invoke<Block>("get_block", { id: nodeId });
-      setActiveBlock(block);
+      const blocks = await invoke<Block[]>("get_block_chunk", { id: nodeId });
+      if (blocks.length === 0) return;
+      const head = blocks[0];
+      setActiveBlock(head);
+
+      // 从 metadata 中提取精确页码，回退到 order_idx 估算
+      let targetPage = 0;
+      try {
+        const meta = JSON.parse(head.metadata || "{}");
+        if (meta.page) {
+          targetPage = meta.page as number;
+        }
+      } catch {}
+      if (!targetPage) {
+        const totalBlocks = tocTree.reduce((s, n) => s + countNodes(n), 0);
+        targetPage = Math.max(1, Math.ceil((head.order_idx / Math.max(totalBlocks, 1)) * 1129));
+      }
+      if (targetPage > 0) {
+        pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: targetPage }, "*");
+      }
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
     }
-  }, []);
+  }, [tocTree]);
 
   const handleContentChange = useCallback(
     async (blockId: string, newContent: string, version: number) => {
@@ -276,13 +312,13 @@ function App() {
   }
 
   // =========================================================================
-  // 主界面：三区布局
+  // 主界面
   // =========================================================================
   return (
     <div className="app-grid" style={{
-      gridTemplateColumns: `${leftW}px 4px 1fr 4px ${rightW}px`,
-      gridTemplateRows: `40px 1fr 4px ${bottomH}px`,
-      gridTemplateAreas: `"toolbar toolbar toolbar toolbar toolbar" "left handle-c center handle-r right" "hbot hbot hbot hbot hbot" "bottom bottom bottom bottom bottom"`,
+      gridTemplateColumns: "1fr",
+      gridTemplateRows: "40px 1fr 4px 140px",
+      gridTemplateAreas: `"toolbar" "main" "hbot" "bottom"`,
     }}>
       <header className="toolbar">
         <h1 className="app-title">NarrativeStructure</h1>
@@ -296,42 +332,52 @@ function App() {
         </div>
       </header>
 
-      <aside className="panel-left">
-        <div className="panel-section toc-section">
-          <h3>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</h3>
-          <TOC nodes={tocTree} onSelect={handleSelectBlock} />
-        </div>
-        <div className="panel-section files-section">
-          <FileExplorer projectPath={projectPath} />
-        </div>
-      </aside>
-
-      <div className="resize-handle resize-h" style={{ gridArea: "handle-c" }} {...bindLeft()} />
-
-      <div className="panel-center">
-        <div className="workbench-split" id="workbench-split">
-          <div className="wb-left" style={{ width: `${splitPct}%` }}>
-            <PdfViewer key={projectKey} projectPath={projectPath} docName={projectName} />
+      <div style={{ gridArea: "main", overflow: "hidden" }}>
+        <Workspace>
+          {/* 左侧：TOC + 文件资产 */}
+          <div className="workspace-left" style={{ width: leftW }}>
+            <div className="toc-section">
+              <h3>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</h3>
+              <TOC nodes={tocTree} onSelect={handleSelectBlock} />
+            </div>
+            <div className="files-section">
+              <FileExplorer projectPath={projectPath} />
+            </div>
           </div>
-          <div className="resize-handle resize-h" {...bindSplit({ usePercent: true, getContainerWidth: () => document.getElementById("workbench-split")?.clientWidth ?? 800 })} />
-          <div className="wb-right" style={{ flex: 1 }}>
-            <BlockEditor block={activeBlock} onChange={handleContentChange} />
+
+          <div className="workspace-resize-h" {...bindLeft()} />
+
+          {/* 中间：PDF + Editor */}
+          <div className="workspace-center">
+            <div className="workbench-split" id="workbench-split">
+              <div className="wb-left" style={{ width: `${splitPct}%` }}>
+                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
+              </div>
+              <div className="workspace-resize-h" {...bindSplit({ usePercent: true, getContainerWidth: () => document.getElementById("workbench-split")?.clientWidth ?? 800 })} />
+              <div className="wb-right" style={{ flex: 1 }}>
+                <BlockEditor block={activeBlock} onChange={handleContentChange} />
+              </div>
+            </div>
           </div>
-        </div>
+
+          <div className="workspace-resize-h" {...bindRight({ reversed: true })} />
+
+          {/* 右侧：Pipeline + Console */}
+          <div className="workspace-right" style={{ width: rightW }}>
+            <div className="pr-section">
+              <h3>⚙️ 流程管线</h3>
+              <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
+            </div>
+            <div className="pr-section pr-console">
+              <h3>💬 智能对话</h3>
+              <AgentConsole />
+            </div>
+          </div>
+
+          {/* 连线信息层（绝对定位，覆盖 workspace 全区域） */}
+          <LinesLayer lines={lines} />
+        </Workspace>
       </div>
-
-      <div className="resize-handle resize-h" style={{ gridArea: "handle-r" }} {...bindRight({ reversed: true })} />
-
-      <aside className="panel-right">
-        <div className="pr-section">
-          <h3>⚙️ 流程管线</h3>
-          <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
-        </div>
-        <div className="pr-section pr-console">
-          <h3>💬 智能对话</h3>
-          <AgentConsole />
-        </div>
-      </aside>
 
       <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom({ reversed: true })} />
 

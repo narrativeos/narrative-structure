@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
-use crate::markdown_parser::parse_markdown;
+use crate::markdown_parser::{parse_markdown, ParsedBlock};
 
 /// 数据库建表 SQL（与 scripts/init_db.py 保持一致）
 const DB_SCHEMA: &str = "
@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     level       INTEGER NOT NULL DEFAULT 0,
     block_type  TEXT NOT NULL DEFAULT 'text',
     content     TEXT DEFAULT '',
+    original_content TEXT DEFAULT '',
     metadata    TEXT DEFAULT '{}',
     version     INTEGER NOT NULL DEFAULT 1,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -114,6 +115,112 @@ fn days_to_ymd(days: i64) -> (i64, u8, u8) {
     (y, m as u8, d as u8)
 }
 
+// =========================================================================
+// 页码映射: 从 _middle.json 的 title 块中提取标题→页码映射
+// =========================================================================
+
+/// 从 _middle.json 提取所有 title 块的 (文本, 页码) 映射
+fn build_title_page_map(json_path: &Path) -> Result<Vec<(String, usize)>, String> {
+    let content = fs::read_to_string(json_path)
+        .map_err(|e| format!("读取 middle.json 失败: {}", e))?;
+    let root: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 middle.json 失败: {}", e))?;
+    let pdf_info = root.get("pdf_info")
+        .and_then(|v| v.as_array())
+        .ok_or("middle.json 缺少 pdf_info")?;
+
+    let mut title_pages: Vec<(String, usize)> = Vec::new();
+
+    for page in pdf_info {
+        let page_idx = page.get("page_idx")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        if let Some(para_blocks) = page.get("para_blocks").and_then(|v| v.as_array()) {
+            for pb in para_blocks {
+                let block_type = pb.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if block_type != "title" {
+                    continue;
+                }
+
+                let mut text = String::new();
+                if let Some(lines) = pb.get("lines").and_then(|v| v.as_array()) {
+                    for line in lines {
+                        if let Some(spans) = line.get("spans").and_then(|v| v.as_array()) {
+                            for span in spans {
+                                if let Some(t) = span.get("content").and_then(|v| v.as_str()) {
+                                    text.push_str(t);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !text.is_empty() {
+                    title_pages.push((text, page_idx + 1)); // 1-indexed
+                }
+            }
+        }
+    }
+
+    Ok(title_pages)
+}
+
+/// 为每个 section 查找对应页码（从 title_page_map 中匹配标题文本）
+fn resolve_page_numbers(blocks: &mut [ParsedBlock], title_page_map: &[(String, usize)]) {
+    for block in blocks.iter_mut() {
+        // 提取 section 的标题文本（首行去掉 # 前缀）
+        let heading_line = block.content.lines().next().unwrap_or("");
+        let heading_text = heading_line.trim_start_matches('#').trim();
+        if heading_text.is_empty() {
+            continue;
+        }
+
+        // 策略1: 精确匹配 title 块文本
+        for (title, page) in title_page_map {
+            if title.contains(heading_text) || heading_text.contains(title.as_str()) {
+                block.metadata = format!("{{\"page\":{}}}", page);
+                break;
+            }
+        }
+
+        // 策略2: 模糊匹配 — 标题前20个非空格字符
+        if block.metadata == "{}" && heading_text.len() > 5 {
+            let short: String = heading_text.chars().filter(|c| !c.is_whitespace()).take(20).collect();
+            for (title, page) in title_page_map {
+                let title_compact: String = title.chars().filter(|c| !c.is_whitespace()).collect();
+                if title_compact.contains(&short) || short.contains(&title_compact) {
+                    block.metadata = format!("{{\"page\":{}}}", page);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// 递归搜索目录中匹配的文件
+fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        return None;
+    }
+    for entry in fs::read_dir(dir).ok()? {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                if predicate(name) {
+                    return Some(path);
+                }
+            }
+        } else if path.is_dir() {
+            if let found @ Some(_) = find_file_in_dir(&path, predicate) {
+                return found;
+            }
+        }
+    }
+    None
+}
+
 /// 导入 zip 并作为新项目打开
 /// 流程: 解压 → 以时间戳创建项目目录 → 初始化 DB → 解析 MD → 打开项目
 #[tauri::command]
@@ -198,18 +305,26 @@ pub fn import_new_project(
         conn.execute_batch(DB_SCHEMA)
             .map_err(|e| format!("建表失败: {}", e))?;
 
-        // 解析 Markdown → 写入 blocks
+        // Markdown 标题分 section → 从 _middle.json title 块映射页码 → 写入 DB
         if let Some(ref md) = md_content {
-            let parsed = parse_markdown(md);
+            let mut parsed = parse_markdown(md);
             if !parsed.is_empty() {
+                // 页码映射: _middle.json title 块 → section 标题匹配
+                let assets_dir = project_dir.join("assets");
+                if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
+                    if let Ok(title_map) = build_title_page_map(&middle_path) {
+                        resolve_page_numbers(&mut parsed, &title_map);
+                    }
+                }
+
                 conn.execute("BEGIN", []).map_err(|e| format!("事务失败: {}", e))?;
                 for block in &parsed {
                     conn.execute(
-                        "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, metadata)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, original_content, metadata)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                         rusqlite::params![
                             block.id, block.parent_id, block.order_idx,
-                            block.level, block.block_type, block.content, block.metadata,
+                            block.level, block.block_type, block.content, block.content, block.metadata,
                         ],
                     )
                     .map_err(|e| format!("插入块失败: {}", e))?;
@@ -220,12 +335,17 @@ pub fn import_new_project(
     }
 
     // 打开项目
-    open_project_inner(state, project_dir.clone())?;
+    open_project_inner(&state, project_dir.clone())?;
 
-    let block_count = md_content
-        .as_ref()
-        .map(|md| parse_markdown(md).len())
-        .unwrap_or(0);
+    let block_count: i32 = {
+        let guard = state.db_conn.lock().unwrap();
+        if let Some(ref conn) = *guard {
+            conn.query_row("SELECT COUNT(*) FROM blocks", [], |r| r.get(0))
+                .unwrap_or(0)
+        } else {
+            0
+        }
+    };
 
     Ok(format!(
         "{} | {} 个语义块 | {}",
@@ -240,12 +360,12 @@ pub fn open_project(
     path: String,
 ) -> Result<String, String> {
     let project_path = PathBuf::from(&path);
-    open_project_inner(state, project_path)
+    open_project_inner(&state, project_path)
 }
 
 /// 内部打开项目逻辑（供 create_project 复用）
 fn open_project_inner(
-    state: tauri::State<'_, ProjectState>,
+    state: &tauri::State<'_, ProjectState>,
     project_path: PathBuf,
 ) -> Result<String, String> {
     // 1. 验证目录存在
@@ -279,6 +399,9 @@ fn open_project_inner(
          PRAGMA busy_timeout=5000;",
     )
     .map_err(|e| format!("PRAGMA 设置失败: {}", e))?;
+
+    // 迁移：为旧数据库添加 original_content 列
+    let _ = conn.execute_batch("ALTER TABLE blocks ADD COLUMN original_content TEXT DEFAULT ''");
 
     // 6. 更新全局状态
     {
@@ -382,9 +505,9 @@ pub fn import_document(
     // 也解压 images/ 子目录
     // (上面已按文件名处理，flat 结构也可以)
 
-    // 4. 解析 Markdown → SemanticBlock
+    // 4. Markdown 标题分 section → 页码映射
     let md_text = md_content.ok_or("zip 中未找到 .md 文件")?;
-    let parsed_blocks = parse_markdown(&md_text);
+    let mut parsed_blocks = parse_markdown(&md_text);
 
     if parsed_blocks.is_empty() {
         return Ok(format!(
@@ -393,12 +516,19 @@ pub fn import_document(
         ));
     }
 
+    // 从 _middle.json title 块映射页码
+    if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
+        if let Ok(title_map) = build_title_page_map(&middle_path) {
+            resolve_page_numbers(&mut parsed_blocks, &title_map);
+        }
+    }
+
     // 5. 批量写入数据库（事务）
     conn.execute("BEGIN", [])
         .map_err(|e| format!("事务开始失败: {}", e))?;
 
-    let insert_sql = "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, metadata)
-                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+    let insert_sql = "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, original_content, metadata)
+                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
     let block_count = parsed_blocks.len();
     for block in &parsed_blocks {
@@ -410,6 +540,7 @@ pub fn import_document(
                 block.order_idx,
                 block.level,
                 block.block_type,
+                block.content,
                 block.content,
                 block.metadata,
             ],
@@ -440,6 +571,15 @@ pub fn find_asset_file(
     let mut result = None;
     collect_matching_files(&assets_dir, &assets_dir, &pattern, &mut result);
     Ok(result)
+}
+
+/// 读取文件并返回字节数组
+#[tauri::command]
+pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    let mut file = fs::File::open(&path).map_err(|e| format!("无法打开: {}", e))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).map_err(|e| format!("读取失败: {}", e))?;
+    Ok(buf)
 }
 
 fn collect_matching_files(base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {
@@ -489,11 +629,11 @@ fn collect_files(base: &Path, dir: &Path, out: &mut Vec<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let rel = path.strip_prefix(base).unwrap_or(&path);
             if path.is_dir() {
                 collect_files(base, &path, out);
             } else {
-                out.push(rel.display().to_string());
+                // 返回绝对路径，确保自定义协议能直接访问
+                out.push(path.display().to_string());
             }
         }
     }

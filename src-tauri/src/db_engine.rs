@@ -15,6 +15,7 @@ pub struct Block {
     pub level: i32,
     pub block_type: String,
     pub content: String,
+    pub original_content: String,
     pub metadata: String,   // JSON string
     pub version: i32,
     pub created_at: String,
@@ -42,11 +43,39 @@ fn get_conn<'a>(state: &'a tauri::State<'a, ProjectState>) -> Result<std::sync::
     state.db_conn.lock().map_err(|e| e.to_string())
 }
 
+/// 内部获取单个块（供 get_block_chunk 等复用）
+fn get_block_inner(state: &tauri::State<'_, ProjectState>, id: &str) -> Result<Block, String> {
+    let conn_guard = state.db_conn.lock().map_err(|e| e.to_string())?;
+    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
+    conn.query_row(
+        "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
+                version, created_at, updated_at
+         FROM blocks WHERE id = ?1",
+        rusqlite::params![id],
+        |row| {
+            Ok(Block {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                order_idx: row.get(2)?,
+                level: row.get(3)?,
+                block_type: row.get(4)?,
+                content: row.get(5)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        },
+    )
+    .map_err(|e| format!("块不存在: {}", e))
+}
+
 // ---------------------------------------------------------------------------
 // Tauri Commands
 // ---------------------------------------------------------------------------
 
-/// 获取目录树 (所有 heading 类型 + 它们之间的层级关系)
+/// 获取目录树 (所有 section，按层级构建树)
 #[tauri::command]
 pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, String> {
     let conn_guard = get_conn(&state)?;
@@ -57,7 +86,7 @@ pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, St
             "SELECT id, parent_id, order_idx, level, block_type,
                     substr(content, 1, 80) as content_preview
              FROM blocks
-             WHERE block_type = 'heading' OR parent_id IS NULL
+             WHERE block_type = 'section'
              ORDER BY level, order_idx",
         )
         .map_err(|e| e.to_string())?;
@@ -129,7 +158,7 @@ pub fn get_blocks(
 
     let query = match &parent_id {
         Some(_) => {
-            "SELECT id, parent_id, order_idx, level, block_type, content, metadata,
+            "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
                     version, created_at, updated_at
              FROM blocks
              WHERE parent_id = ?1
@@ -137,7 +166,7 @@ pub fn get_blocks(
              LIMIT ?2 OFFSET ?3"
         }
         None => {
-            "SELECT id, parent_id, order_idx, level, block_type, content, metadata,
+            "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
                     version, created_at, updated_at
              FROM blocks
              WHERE parent_id IS NULL
@@ -159,10 +188,11 @@ pub fn get_blocks(
                     level: row.get(3)?,
                     block_type: row.get(4)?,
                     content: row.get(5)?,
-                    metadata: row.get(6)?,
-                    version: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    original_content: row.get(6)?,
+                    metadata: row.get(7)?,
+                    version: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             },
         )
@@ -201,7 +231,7 @@ pub fn update_block(
 
     // 返回更新后的块
     conn.query_row(
-        "SELECT id, parent_id, order_idx, level, block_type, content, metadata,
+        "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
                 version, created_at, updated_at
          FROM blocks WHERE id = ?1",
         params![id],
@@ -213,10 +243,11 @@ pub fn update_block(
                 level: row.get(3)?,
                 block_type: row.get(4)?,
                 content: row.get(5)?,
-                metadata: row.get(6)?,
-                version: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         },
     )
@@ -236,7 +267,7 @@ pub fn search_blocks(
     let mut stmt = conn
         .prepare(
             "SELECT b.id, b.parent_id, b.order_idx, b.level, b.block_type,
-                    b.content, b.metadata, b.version, b.created_at, b.updated_at
+                    b.content, b.original_content, b.metadata, b.version, b.created_at, b.updated_at
              FROM blocks b
              INNER JOIN blocks_fts fts ON b.rowid = fts.rowid
              WHERE blocks_fts MATCH ?1
@@ -254,10 +285,97 @@ pub fn search_blocks(
                 level: row.get(3)?,
                 block_type: row.get(4)?,
                 content: row.get(5)?,
-                metadata: row.get(6)?,
-                version: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(blocks)
+}
+
+/// 按 PDF 页码范围加载块
+#[tauri::command]
+pub fn get_blocks_by_page(
+    state: tauri::State<'_, ProjectState>,
+    page_start: i32,
+    page_end: i32,
+) -> Result<Vec<Block>, String> {
+    let conn_guard = get_conn(&state)?;
+    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
+                    version, created_at, updated_at
+             FROM blocks
+             WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) BETWEEN ?1 AND ?2
+             ORDER BY order_idx",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let blocks: Vec<Block> = stmt
+        .query_map(params![page_start, page_end], |row| {
+            Ok(Block {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                order_idx: row.get(2)?,
+                level: row.get(3)?,
+                block_type: row.get(4)?,
+                content: row.get(5)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(blocks)
+}
+
+/// 获取所有块（按 order_idx 排序，分页）
+#[tauri::command]
+pub fn get_blocks_paginated(
+    state: tauri::State<'_, ProjectState>,
+    limit: i32,
+    offset: i32,
+) -> Result<Vec<Block>, String> {
+    let conn_guard = get_conn(&state)?;
+    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
+                    version, created_at, updated_at
+             FROM blocks
+             ORDER BY order_idx
+             LIMIT ?1 OFFSET ?2",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let blocks: Vec<Block> = stmt
+        .query_map(params![limit, offset], |row| {
+            Ok(Block {
+                id: row.get(0)?,
+                parent_id: row.get(1)?,
+                order_idx: row.get(2)?,
+                level: row.get(3)?,
+                block_type: row.get(4)?,
+                content: row.get(5)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -277,7 +395,7 @@ pub fn get_block(
     let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
 
     conn.query_row(
-        "SELECT id, parent_id, order_idx, level, block_type, content, metadata,
+        "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
                 version, created_at, updated_at
          FROM blocks WHERE id = ?1",
         params![id],
@@ -289,14 +407,26 @@ pub fn get_block(
                 level: row.get(3)?,
                 block_type: row.get(4)?,
                 content: row.get(5)?,
-                metadata: row.get(6)?,
-                version: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                original_content: row.get(6)?,
+                metadata: row.get(7)?,
+                version: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         },
     )
     .map_err(|e| format!("块不存在: {}", e))
+}
+
+/// 获取块及其所有子孙块（扁平列表）
+/// 注：section 级分块后，每个 block 已是完整章节
+#[tauri::command]
+pub fn get_block_chunk(
+    state: tauri::State<'_, ProjectState>,
+    id: String,
+) -> Result<Vec<Block>, String> {
+    let block = get_block_inner(&state, &id)?;
+    Ok(vec![block])
 }
 
 /// 获取块的子块数量

@@ -45,6 +45,17 @@
 .fe-icon {
   flex-shrink: 0;
   font-size: 13px;
+  width: 24px;
+  text-align: center;
+}
+
+.fe-thumb {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: var(--color-surface);
 }
 
 .fe-name {
