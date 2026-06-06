@@ -17,6 +17,7 @@ chrono = { version = "0.4", features = ["serde"] }
 zip = "2"
 percent-encoding = "2"
 mime_guess = "2"
+unicode-normalization = "0.1"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

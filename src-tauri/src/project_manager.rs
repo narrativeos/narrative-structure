@@ -5,7 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::UNIX_EPOCH;
 
-use crate::markdown_parser::{parse_markdown, ParsedBlock};
+
+
+use crate::markdown_parser::parse_markdown;
+use crate::page_mapper;
+
 
 /// 数据库建表 SQL（与 scripts/init_db.py 保持一致）
 const DB_SCHEMA: &str = "
@@ -115,89 +119,6 @@ fn days_to_ymd(days: i64) -> (i64, u8, u8) {
     (y, m as u8, d as u8)
 }
 
-// =========================================================================
-// 页码映射: 从 _middle.json 的 title 块中提取标题→页码映射
-// =========================================================================
-
-/// 从 _middle.json 提取所有 title 块的 (文本, 页码) 映射
-fn build_title_page_map(json_path: &Path) -> Result<Vec<(String, usize)>, String> {
-    let content = fs::read_to_string(json_path)
-        .map_err(|e| format!("读取 middle.json 失败: {}", e))?;
-    let root: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("解析 middle.json 失败: {}", e))?;
-    let pdf_info = root.get("pdf_info")
-        .and_then(|v| v.as_array())
-        .ok_or("middle.json 缺少 pdf_info")?;
-
-    let mut title_pages: Vec<(String, usize)> = Vec::new();
-
-    for page in pdf_info {
-        let page_idx = page.get("page_idx")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-
-        if let Some(para_blocks) = page.get("para_blocks").and_then(|v| v.as_array()) {
-            for pb in para_blocks {
-                let block_type = pb.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if block_type != "title" {
-                    continue;
-                }
-
-                let mut text = String::new();
-                if let Some(lines) = pb.get("lines").and_then(|v| v.as_array()) {
-                    for line in lines {
-                        if let Some(spans) = line.get("spans").and_then(|v| v.as_array()) {
-                            for span in spans {
-                                if let Some(t) = span.get("content").and_then(|v| v.as_str()) {
-                                    text.push_str(t);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if !text.is_empty() {
-                    title_pages.push((text, page_idx + 1)); // 1-indexed
-                }
-            }
-        }
-    }
-
-    Ok(title_pages)
-}
-
-/// 为每个 section 查找对应页码（从 title_page_map 中匹配标题文本）
-fn resolve_page_numbers(blocks: &mut [ParsedBlock], title_page_map: &[(String, usize)]) {
-    for block in blocks.iter_mut() {
-        // 提取 section 的标题文本（首行去掉 # 前缀）
-        let heading_line = block.content.lines().next().unwrap_or("");
-        let heading_text = heading_line.trim_start_matches('#').trim();
-        if heading_text.is_empty() {
-            continue;
-        }
-
-        // 策略1: 精确匹配 title 块文本
-        for (title, page) in title_page_map {
-            if title.contains(heading_text) || heading_text.contains(title.as_str()) {
-                block.metadata = format!("{{\"page\":{}}}", page);
-                break;
-            }
-        }
-
-        // 策略2: 模糊匹配 — 标题前20个非空格字符
-        if block.metadata == "{}" && heading_text.len() > 5 {
-            let short: String = heading_text.chars().filter(|c| !c.is_whitespace()).take(20).collect();
-            for (title, page) in title_page_map {
-                let title_compact: String = title.chars().filter(|c| !c.is_whitespace()).collect();
-                if title_compact.contains(&short) || short.contains(&title_compact) {
-                    block.metadata = format!("{{\"page\":{}}}", page);
-                    break;
-                }
-            }
-        }
-    }
-}
-
 /// 递归搜索目录中匹配的文件
 fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> {
     if !dir.is_dir() {
@@ -221,10 +142,11 @@ fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> 
     None
 }
 
-/// 导入 zip 并作为新项目打开
+/// 发送进度事件到前端
 /// 流程: 解压 → 以时间戳创建项目目录 → 初始化 DB → 解析 MD → 打开项目
 #[tauri::command]
 pub fn import_new_project(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, ProjectState>,
     zip_path: String,
 ) -> Result<String, String> {
@@ -238,6 +160,9 @@ pub fn import_new_project(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("untitled");
+
+    let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
+    page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0));
 
     // 项目文件夹 = <project_root>/Projects/<timestamp_id>/
     let project_id = timestamp_id();
@@ -261,8 +186,11 @@ pub fn import_new_project(
         .map_err(|e| format!("无法读取 zip: {}", e))?;
 
     let mut md_content: Option<String> = None;
+    let total_entries = archive.len();
+    page_mapper::emit_log(&app_handle, &format!("[import] ZIP 包含 {} 个条目，开始解压...", total_entries));
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 5, &format!("共 {} 个文件", total_entries));
 
-    for i in 0..archive.len() {
+    for i in 0..total_entries {
         let mut entry = archive.by_index(i)
             .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
         let entry_name = entry.name().to_string();
@@ -291,7 +219,10 @@ pub fn import_new_project(
         }
     }
 
+    page_mapper::emit_log(&app_handle, &format!("[import] 解压完成 → {}", assets_subdir.display()));
+
     // 初始化 narrative.db
+    page_mapper::emit_progress(&app_handle, "初始化数据库", 30, "创建表结构...");
     let db_path = project_dir.join("narrative.db");
     {
         let conn = Connection::open(&db_path)
@@ -305,20 +236,29 @@ pub fn import_new_project(
         conn.execute_batch(DB_SCHEMA)
             .map_err(|e| format!("建表失败: {}", e))?;
 
-        // Markdown 标题分 section → 从 _middle.json title 块映射页码 → 写入 DB
+        // Markdown 行级分块 → 基于 _middle.json bbox 文本匹配页码 → 写入 DB
         if let Some(ref md) = md_content {
+            page_mapper::emit_log(&app_handle, &format!("[import] MD 大小: {} bytes", md.len()));
+            page_mapper::emit_progress(&app_handle, "解析 Markdown", 35, "行级分块...");
             let mut parsed = parse_markdown(md);
+            let line_count = parsed.len();
+            page_mapper::emit_log(&app_handle, &format!("[import] 解析完成: {} 行 (headings: {})", line_count,
+                parsed.iter().filter(|b| b.block_type == "heading").count()));
+
             if !parsed.is_empty() {
-                // 页码映射: _middle.json title 块 → section 标题匹配
+                // 页码映射: bbox span 文本 → MD 行匹配
                 let assets_dir = project_dir.join("assets");
                 if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-                    if let Ok(title_map) = build_title_page_map(&middle_path) {
-                        resolve_page_numbers(&mut parsed, &title_map);
-                    }
+                    page_mapper::emit_progress(&app_handle, "加载信息层", 40, "展开 _middle.json bbox...");
+                    page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed);
                 }
 
+                page_mapper::emit_progress(&app_handle, "写入数据库", 90, &format!("共 {} 行", line_count));
                 conn.execute("BEGIN", []).map_err(|e| format!("事务失败: {}", e))?;
-                for block in &parsed {
+                for (idx, block) in parsed.iter().enumerate() {
+                    if idx % 100 == 0 {
+                        page_mapper::emit_progress(&app_handle, "写入数据库", 90 + ((idx as u8).saturating_mul(9).saturating_div(line_count as u8)), "");
+                    }
                     conn.execute(
                         "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, original_content, metadata)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
@@ -330,12 +270,15 @@ pub fn import_new_project(
                     .map_err(|e| format!("插入块失败: {}", e))?;
                 }
                 conn.execute("COMMIT", []).map_err(|e| format!("提交失败: {}", e))?;
+                page_mapper::emit_log(&app_handle, &format!("[import] DB 写入完成: {} 行", line_count));
             }
         }
     }
 
     // 打开项目
     open_project_inner(&state, project_dir.clone())?;
+
+    page_mapper::emit_progress(&app_handle, "完成", 100, "项目就绪");
 
     let block_count: i32 = {
         let guard = state.db_conn.lock().unwrap();
@@ -434,6 +377,7 @@ pub fn close_project(state: tauri::State<'_, ProjectState>) -> Result<String, St
 /// 导入 MinerU 输出 zip 包: 解压 → 复制到 assets/ → 解析 .md → 写入 blocks
 #[tauri::command]
 pub fn import_document(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, ProjectState>,
     zip_path: String,
 ) -> Result<String, String> {
@@ -450,6 +394,10 @@ pub fn import_document(
         return Err(format!("文件不存在: {}", zip_path));
     }
 
+    let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
+
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 5, "读取压缩包...");
+
     // 1. 读取 zip
     let file = fs::File::open(&zip_file)
         .map_err(|e| format!("无法打开 zip: {}", e))?;
@@ -462,14 +410,19 @@ pub fn import_document(
         .and_then(|s| s.to_str())
         .unwrap_or("imported_doc");
 
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] 开始追加导入: {} ({:.1} MB)", doc_name, zip_size as f64 / 1_048_576.0));
+
     let assets_dir = project_path.join("assets").join(doc_name);
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("无法创建资源目录: {}", e))?;
 
     // 3. 解压所有文件到 assets/<doc_name>/
     let mut md_content: Option<String> = None;
+    let total_entries = archive.len();
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] ZIP 包含 {} 个条目，解压中...", total_entries));
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 10, &format!("共 {} 个文件", total_entries));
 
-    for i in 0..archive.len() {
+    for i in 0..total_entries {
         let mut entry = archive.by_index(i)
             .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
         let entry_name = entry.name().to_string();
@@ -502,10 +455,9 @@ pub fn import_document(
         }
     }
 
-    // 也解压 images/ 子目录
-    // (上面已按文件名处理，flat 结构也可以)
+    page_mapper::emit_progress(&app_handle, "解析 Markdown", 35, "行级分块...");
 
-    // 4. Markdown 标题分 section → 页码映射
+    // 4. Markdown 行级分块 → 页码映射
     let md_text = md_content.ok_or("zip 中未找到 .md 文件")?;
     let mut parsed_blocks = parse_markdown(&md_text);
 
@@ -516,12 +468,14 @@ pub fn import_document(
         ));
     }
 
-    // 从 _middle.json title 块映射页码
+    // 基于 _middle.json bbox span 文本 → MD 行匹配页码
     if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-        if let Ok(title_map) = build_title_page_map(&middle_path) {
-            resolve_page_numbers(&mut parsed_blocks, &title_map);
-        }
+        page_mapper::emit_progress(&app_handle, "加载信息层", 40, "展开 _middle.json bbox...");
+        page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed_blocks);
     }
+
+    let block_count = parsed_blocks.len();
+    page_mapper::emit_progress(&app_handle, "写入数据库", 90, &format!("共 {} 行", block_count));
 
     // 5. 批量写入数据库（事务）
     conn.execute("BEGIN", [])
@@ -530,8 +484,10 @@ pub fn import_document(
     let insert_sql = "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, original_content, metadata)
                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
-    let block_count = parsed_blocks.len();
-    for block in &parsed_blocks {
+    for (idx, block) in parsed_blocks.iter().enumerate() {
+        if idx % 100 == 0 {
+            page_mapper::emit_progress(&app_handle, "写入数据库", 90 + ((idx as u8).saturating_mul(9).saturating_div(block_count as u8)), "");
+        }
         conn.execute(
             insert_sql,
             rusqlite::params![
@@ -550,6 +506,8 @@ pub fn import_document(
 
     conn.execute("COMMIT", [])
         .map_err(|e| format!("事务提交失败: {}", e))?;
+
+    page_mapper::emit_progress(&app_handle, "完成", 100, &format!("{} 个语义块就绪", block_count));
 
     Ok(format!(
         "导入成功: {} 个语义块 → assets/{}/",

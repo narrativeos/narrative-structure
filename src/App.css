@@ -391,3 +391,78 @@ html, body, #root {
   text-align: center;
   margin-top: 8px;
 }
+
+/* ---- 导入进度条 ---- */
+.import-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(4px);
+}
+
+.import-progress-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 24px 32px;
+  min-width: 360px;
+  max-width: 480px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.import-progress-stage {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 12px;
+}
+
+.import-progress-bar-wrap {
+  height: 8px;
+  background: var(--color-surface);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.import-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-accent), #818cf8);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.import-progress-detail {
+  font-size: 12px;
+  color: var(--color-text-dim);
+  margin-bottom: 4px;
+}
+
+.import-progress-pct {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-accent);
+  text-align: right;
+}
+
+.import-logs {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+.import-log-line {
+  color: var(--color-text-dim);
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -1,6 +1,7 @@
 pub mod project_manager;
 pub mod db_engine;
 pub mod markdown_parser;
+pub mod page_mapper;
 
 use project_manager::ProjectState;
 use tauri::http::{Request, Response, StatusCode};

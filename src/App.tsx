@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
@@ -42,6 +43,7 @@ function countNodes(node: TocNode): number {
 }
 
 // ---- 最近项目持久化 ----
+interface ImportProgress { stage: string; percent: number; detail: string; }
 interface RecentProject { name: string; path: string; time: number }
 const RECENT_KEY = "narrative-structure-recent";
 
@@ -73,6 +75,8 @@ function App() {
   const [projectKey, setProjectKey] = useState(0);
   const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, _setLines] = useState<LineDef[]>([]);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+  const [importLogs, setImportLogs] = useState<string[]>([]);
 
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
@@ -118,10 +122,30 @@ function App() {
 
       const zipPath = typeof selected === "string" ? selected : String(selected);
       setStatusMsg(`正在导入: ${zipPath} ...`);
+      setImportProgress({ stage: "准备中", percent: 0, detail: "正在初始化..." });
+      setImportLogs([]);
+
+      // 短暂延迟，让 React 先渲染初始进度条，再注册监听和调用导入
+      await new Promise(r => setTimeout(r, 30));
+
+      const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
+        console.log("[import]", e.payload.stage, e.payload.percent + "%", e.payload.detail);
+        setImportProgress(e.payload);
+      });
+      const unlistenLog = await listen<string>("import-log", (e) => {
+        setImportLogs(prev => [...prev.slice(-19), e.payload]);
+      });
+      console.log("[import] 监听已注册，开始导入...");
 
       const msg = await invoke<string>("import_new_project", {
         zipPath: zipPath,
       });
+
+      // 保持进度条至少显示 600ms（防止一闪而过）
+      await new Promise(r => setTimeout(r, 600));
+      unlistenProgress();
+      unlistenLog();
+      setImportProgress(null);
 
       const parts = msg.split(" | ");
       const name = parts[0] || "";
@@ -137,6 +161,9 @@ function App() {
       setTocTree(toc);
     } catch (err) {
       setStatusMsg(`导入失败: ${err}`);
+      setImportProgress(null);
+      setImportLogs([]);
+      setImportLogs([]);
     }
   }, []);
 
@@ -185,15 +212,36 @@ function App() {
       if (!selected) return;
 
       setStatusMsg("正在导入...");
+      setImportProgress({ stage: "准备中", percent: 0, detail: "正在初始化..." });
+      setImportLogs([]);
+
+      await new Promise(r => setTimeout(r, 30));
+
+      const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
+        console.log("[import]", e.payload.stage, e.payload.percent + "%", e.payload.detail);
+        setImportProgress(e.payload);
+      });
+      const unlistenLog = await listen<string>("import-log", (e) => {
+        setImportLogs(prev => [...prev.slice(-19), e.payload]);
+      });
+      console.log("[import] 监听已注册，开始导入...");
+
       const msg = await invoke<string>("import_document", {
         zipPath: selected as string,
       });
+
+      await new Promise(r => setTimeout(r, 600));
+      unlistenProgress();
+      unlistenLog();
+      setImportProgress(null);
+
       setStatusMsg(msg);
 
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
     } catch (err) {
       setStatusMsg(`导入失败: ${err}`);
+      setImportProgress(null);
     }
   }, []);
 
@@ -307,6 +355,26 @@ function App() {
             )}
           </div>
         </div>
+
+        {importProgress && (
+          <div className="import-overlay">
+            <div className="import-progress-card">
+              <div className="import-progress-stage">{importProgress.stage}</div>
+              <div className="import-progress-bar-wrap">
+                <div className="import-progress-bar" style={{ width: `${importProgress.percent}%` }} />
+              </div>
+              <div className="import-progress-detail">{importProgress.detail}</div>
+              <div className="import-progress-pct">{importProgress.percent}%</div>
+              {importLogs.length > 0 && (
+                <div className="import-logs">
+                  {importLogs.map((log, i) => (
+                    <div key={i} className="import-log-line">{log}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -382,8 +450,28 @@ function App() {
       <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom({ reversed: true })} />
 
       <footer className="panel-bottom">
-        <LogPanel />
+        <LogPanel externalLogs={importLogs} />
       </footer>
+
+      {importProgress && (
+        <div className="import-overlay">
+          <div className="import-progress-card">
+            <div className="import-progress-stage">{importProgress.stage}</div>
+            <div className="import-progress-bar-wrap">
+              <div className="import-progress-bar" style={{ width: `${importProgress.percent}%` }} />
+            </div>
+            <div className="import-progress-detail">{importProgress.detail}</div>
+            <div className="import-progress-pct">{importProgress.percent}%</div>
+            {importLogs.length > 0 && (
+              <div className="import-logs">
+                {importLogs.map((log, i) => (
+                  <div key={i} className="import-log-line">{log}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
