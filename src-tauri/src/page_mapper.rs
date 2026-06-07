@@ -139,8 +139,8 @@ fn flatten_bbox_spans(json_path: &Path) -> Result<Vec<BboxSpan>, String> {
                                     continue;
                                 }
                                 let span_bbox = parse_bbox(span.get("bbox"))
-                                    .or_else(|| line_bbox)
-                                    .or_else(|| bbox)
+                                    .or(line_bbox)
+                                    .or(bbox)
                                     .unwrap_or([0.0, 0.0, 0.0, 0.0]);
 
                                 spans.push(BboxSpan {
@@ -288,7 +288,7 @@ pub fn fuzzy_substring_match(line: &str, span_text: &str) -> bool {
 
     if line_chars.len() >= span_len {
         let last_start = line_chars.len() - span_len;
-        if last_start > 0 && last_start % step != 0 {
+        if last_start > 0 && !last_start.is_multiple_of(step) {
             let window: String = line_chars[last_start..].iter().collect();
             if trigram_jaccard(&window, &norm_span) >= threshold {
                 return true;

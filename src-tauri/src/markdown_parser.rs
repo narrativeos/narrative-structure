@@ -34,7 +34,7 @@ pub fn parse_markdown(md_content: &str) -> Vec<ParsedBlock> {
         let (block_type, level, parent_id, bid) = if trimmed.starts_with('#') {
             // ---- 标题行 ----
             let (mut level, _) = parse_heading(line);
-            level = level.max(1).min(6);
+            level = level.clamp(1, 6);
 
             while let Some((_, l)) = heading_stack.last() {
                 if *l >= level {

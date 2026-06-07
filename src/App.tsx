@@ -237,13 +237,11 @@ function App() {
       await new Promise(r => setTimeout(r, 30));
 
       const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
-        console.log("[import]", e.payload.stage, e.payload.percent + "%", e.payload.detail);
         setImportProgress(e.payload);
       });
       const unlistenLog = await listen<string>("import-log", (e) => {
         setImportLogs(prev => [...prev.slice(-19), e.payload]);
       });
-      console.log("[import] 监听已注册，开始导入...");
 
       const msg = await invoke<string>("import_new_project", {
         zipPath: zipPath,
@@ -326,13 +324,11 @@ function App() {
       await new Promise(r => setTimeout(r, 30));
 
       const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
-        console.log("[import]", e.payload.stage, e.payload.percent + "%", e.payload.detail);
         setImportProgress(e.payload);
       });
       const unlistenLog = await listen<string>("import-log", (e) => {
         setImportLogs(prev => [...prev.slice(-19), e.payload]);
       });
-      console.log("[import] 监听已注册，开始导入...");
 
       const msg = await invoke<string>("import_document", {
         zipPath: selected as string,

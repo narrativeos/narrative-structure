@@ -275,20 +275,17 @@ window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.
     }
 
     // 原始文件请求（?raw=1 或非 PDF）
-    match fs::File::open(&path) {
-        Ok(mut file) => {
-            let mut buf = Vec::new();
-            if file.read_to_end(&mut buf).is_ok() {
-                let mime = mime_guess::from_path(&path).first_or_octet_stream();
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header("Content-Type", mime.as_ref())
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(buf)
-                    .unwrap();
-            }
+    if let Ok(mut file) = fs::File::open(&path) {
+        let mut buf = Vec::new();
+        if file.read_to_end(&mut buf).is_ok() {
+            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", mime.as_ref())
+                .header("Access-Control-Allow-Origin", "*")
+                .body(buf)
+                .unwrap();
         }
-        _ => {}
     }
     Response::builder()
         .status(StatusCode::NOT_FOUND)

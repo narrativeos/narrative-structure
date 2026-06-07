@@ -55,6 +55,12 @@ pub struct ProjectState {
     pub project_path: Mutex<Option<PathBuf>>,
 }
 
+impl Default for ProjectState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProjectState {
     pub fn new() -> Self {
         Self {
@@ -578,13 +584,13 @@ pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-fn collect_matching_files(base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {
+fn collect_matching_files(_base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {
     if out.is_some() { return; }
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                collect_matching_files(base, &path, pattern, out);
+                collect_matching_files(_base, &path, pattern, out);
             } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if name.contains(pattern) {
                     *out = Some(path.display().to_string());
@@ -621,12 +627,12 @@ pub fn list_project_files(
     Ok(files)
 }
 
-fn collect_files(base: &Path, dir: &Path, out: &mut Vec<String>) {
+fn collect_files(_base: &Path, dir: &Path, out: &mut Vec<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                collect_files(base, &path, out);
+                collect_files(_base, &path, out);
             } else {
                 // 返回绝对路径，确保自定义协议能直接访问
                 out.push(path.display().to_string());
