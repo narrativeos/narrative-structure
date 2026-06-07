@@ -28,7 +28,7 @@ body{{margin:0;background:#525659}}
 #toolbar button.active{{background:rgba(59,130,246,0.6);color:#fff;border-color:rgba(59,130,246,0.8)}}
 #viewer{{padding:28px 0 8px 0;width:100%}}
 .page-wrap{{position:relative;display:block;margin:0 auto 4px auto;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
-.page-wrap canvas{{display:block;max-width:100%;height:auto}}
+.page-wrap canvas{{display:block;width:100%;height:auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
@@ -78,7 +78,7 @@ function toggleOverlay(){{
   var btn=document.getElementById('btn-overlay');
   if(overlayVisible){{btn.classList.add('active');}}
   else{{btn.classList.remove('active');}}
-  if(pdfDoc)renderAllPages(pdfDoc);
+  if(pdfDoc)renderAllPages(pdfDoc,true);
   window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
 }}
 
@@ -159,53 +159,80 @@ if(el){{el.scrollIntoView({{behavior:'smooth',block:'start'}});}}
 else{{window.scrollTo(0,0);}}
 setTimeout(function(){{autoScrolling=false;}},1000);
 }}
-function renderAllPages(pdf){{
+// 一次性渲染：CSS width:100% 负责后续所有缩放，不再因 resize 重渲
+function renderAllPages(pdf,isReflow){{
 var viewer=document.getElementById('viewer');
 var containerWidth=viewer.clientWidth-16;
 lastWidth=containerWidth;
+renderedWidth=containerWidth;
+var existing={{}};
+if(isReflow){{
+viewer.querySelectorAll('.page-wrap').forEach(function(w){{
+existing[parseInt(w.id.replace('page-',''))]=w;
+}});
+for(var pn in existing){{
+if(parseInt(pn)>pdf.numPages){{existing[pn].remove();delete existing[pn];}}
+}}
+}}else{{
 viewer.innerHTML='';
+}}
 for(var i=1;i<=pdf.numPages;i++){{
 (function(num){{
+var wrap=existing[num];
+if(wrap){{
+// reflow: 只当基准宽度变化导致 canvas 尺寸不匹配时才重绘
 pdf.getPage(num).then(function(page){{
 var scale=containerWidth/page.getViewport({{scale:1}}).width;
 var viewport=page.getViewport({{scale:scale}});
-// 页面容器
+var c=wrap.querySelector('canvas:not(.overlay)');
+if(c&&(c.width!==viewport.width||c.height!==viewport.height)){{
+c.width=viewport.width;c.height=viewport.height;
+page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
+}}
+var ov=wrap.querySelector('.overlay');
+if(ov&&(ov.width!==viewport.width||ov.height!==viewport.height)){{
+ov.width=viewport.width;ov.height=viewport.height;
+drawOverlay(ov,num,scale);
+}}
+}});
+}}else{{
+pdf.getPage(num).then(function(page){{
+var scale=containerWidth/page.getViewport({{scale:1}}).width;
+var viewport=page.getViewport({{scale:scale}});
 var wrap=document.createElement('div');
 wrap.className='page-wrap';
 wrap.id='page-'+num;
-// PDF canvas
 var c=document.createElement('canvas');
 c.width=viewport.width;c.height=viewport.height;
-var ctx=c.getContext('2d');
 wrap.appendChild(c);
-page.render({{canvasContext:ctx,viewport:viewport}});
-// 信息层 overlay canvas
+page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
 var ov=document.createElement('canvas');
 ov.className='overlay';
 ov.width=viewport.width;ov.height=viewport.height;
 wrap.appendChild(ov);
 drawOverlay(ov,num,scale);
-// 物理页码角标
 var badge=document.createElement('div');
 badge.className='page-num';
 badge.textContent='p'+num;
 wrap.appendChild(badge);
 viewer.appendChild(wrap);
 }});
+}}
 }})(i);
 }}
 }}
+// 智能 resize：仅当容器变宽超 20% 才重渲提升清晰度，缩小/微调用 CSS width:100% 即时缩放
+var renderedWidth=0;
 if(window.ResizeObserver){{
 new ResizeObserver(function(entries){{
 var w=entries[0].contentRect.width-16;
-if(Math.abs(w-lastWidth)>10&&pdfDoc){{
+if(w>renderedWidth*1.1&&renderedWidth>0&&pdfDoc){{
 clearTimeout(renderTimer);
-renderTimer=setTimeout(function(){{renderAllPages(pdfDoc);}},300);
+renderTimer=setTimeout(function(){{renderAllPages(pdfDoc,true);}},500);
 }}
 }}).observe(document.getElementById('viewer'));
 }}
 function detectCurrentPage(){{
-if(autoScrolling)return;
 var pages=document.querySelectorAll('.page-wrap');
 var best=null, bestDist=Infinity;
 var vh=window.innerHeight;
@@ -237,7 +264,7 @@ window.addEventListener('message',function(e){{
 if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
 if(e.data&&e.data.type==='middle-data'){{
 middleData=e.data.data;
-if(pdfDoc)renderAllPages(pdfDoc);
+if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
 if(e.data&&e.data.type==='highlight-bbox'){{
 highlightedTexts=e.data.texts||null;
@@ -252,7 +279,7 @@ overlayVisible=!!e.data.visible;
 var btn=document.getElementById('btn-overlay');
 if(overlayVisible){{btn.classList.add('active');}}
 else{{btn.classList.remove('active');}}
-if(pdfDoc)renderAllPages(pdfDoc);
+if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
 if(e.data&&e.data.type==='get-bbox-pos'){{
 var pgEl=document.getElementById('page-'+e.data.page);

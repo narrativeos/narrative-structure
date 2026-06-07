@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo } from "react";
 import type { TocNode } from "../App";
 import "./TOC.css";
 
@@ -13,7 +13,7 @@ interface TOCProps {
 }
 
 /** 单个 TOC 节点，支持展开/折叠 */
-function TOCItem({ node, onSelect }: { node: TocNode; onSelect: (id: string) => void }) {
+const TOCItem = memo(function TOCItem({ node, onSelect }: { node: TocNode; onSelect: (id: string) => void }) {
   const [expanded, setExpanded] = useState(node.level <= 1);
   const hasChildren = node.children && node.children.length > 0;
 
@@ -47,7 +47,7 @@ function TOCItem({ node, onSelect }: { node: TocNode; onSelect: (id: string) => 
       )}
     </div>
   );
-}
+});
 
 /** 目录树组件：递归渲染 blocks 逻辑树 */
 export default function TOC({ nodes, onSelect }: TOCProps) {
