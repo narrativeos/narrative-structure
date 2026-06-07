@@ -115,17 +115,30 @@ function App() {
     const drawAllLines = () => {
       const wsRect = workspaceRef.current?.getBoundingClientRect();
       if (!wsRect) return;
+      const typeColor: Record<string, [string, string]> = {
+        heading: ['#ef4444', '#dc2626'],
+        text: ['#3b82f6', '#60a5fa'],
+        interline_equation: ['#10b981', '#34d399'],
+        table: ['#f59e0b', '#fbbf24'],
+        image: ['#8b5cf6', '#a78bfa'],
+        empty: ['#6b7280', '#9ca3af'],
+      };
       const newLines: LineDef[] = [];
+      let prevType = '', alt = false;
       document.querySelectorAll('[data-block-id]').forEach(el => {
         const id = el.getAttribute('data-block-id')!;
         const mirrorEl = document.querySelector(`[data-mirror-id="${id}"]`);
         if (!mirrorEl) return;
         const r1 = el.getBoundingClientRect();
         const r2 = mirrorEl.getBoundingClientRect();
-        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + r1.height/2 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: '#fbbf24', active: true });
+        let btype = 'text';
+        el.classList.forEach(c => { if (typeColor[c]) btype = c; });
+        if (btype === prevType) { alt = !alt; } else { alt = false; prevType = btype; }
+        const colors = typeColor[btype] || ['#fbbf24', '#fcd34d'];
+        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + r1.height/2 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: colors[alt ? 1 : 0], active: true });
       });
       setLines(newLines);
-      if (newLines.length) console.log("[mirror] lines:", newLines.length, "first:", JSON.stringify({x1:newLines[0].x1,y1:newLines[0].y1,x2:newLines[0].x2,y2:newLines[0].y2}));    };
+    };
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
