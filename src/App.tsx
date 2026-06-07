@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -90,6 +90,7 @@ function App() {
   const drawLinesRef = useRef<() => void>();
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
+  const pageReqIdRef = useRef(0);
 
   // 区块标注开关 → 同步 iframe 信息层
   useEffect(() => {
@@ -154,11 +155,12 @@ function App() {
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
         // 滚动时也刷新 bbox 位置（debounce 150ms）
         const iframeWin = pdfIframeRef.current?.contentWindow;
-        const texts = pageTextsRef.current;
-        if (iframeWin && texts.length) {
+        if (iframeWin) {
           clearTimeout(scrollBboxTimerRef.current);
           const reqId = ++bboxRequestIdRef.current;
           scrollBboxTimerRef.current = setTimeout(() => {
+            const texts = pageTextsRef.current;
+            if (!texts.length) return;
             (window as any).__flyReqId = reqId;
             iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
           }, 150);
@@ -349,24 +351,37 @@ function App() {
     }
   }, []);
 
-  // PDF 翻页 → 加载当前页 ±1 页所有行块，清除飞线
+  // PDF 翻页 → 加载当前页 ±5 页（共11页），UI 显示 ±2 页（共5页）
   const handlePageChange = useCallback(async (page: number) => {
     currentPageRef.current = page;
     setMirrorBboxes([]); setLines([]);
+    const reqId = ++pageReqIdRef.current;
     try {
-      const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart: Math.max(1, page - 2), pageEnd: page + 2 });
+      const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart: Math.max(1, page - 5), pageEnd: page + 5 });
+      if (reqId !== pageReqIdRef.current) return;
       if (blocks.length > 0) {
         setPageBlocks(blocks);
         setActiveBlock(null);
       }
     } catch {
-      // 回退：用 order_idx 估算
+      if (reqId !== pageReqIdRef.current) return;
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
+        if (reqId !== pageReqIdRef.current) return;
         if (blocks.length > 0) setPageBlocks(blocks);
       } catch {}
     }
   }, []);
+
+  // UI 可见页：当前页 ±2（共5页），其余为预加载数据
+  const visibleBlocks = useMemo(() => {
+    if (!pageBlocks) return null;
+    const cp = currentPageRef.current;
+    return pageBlocks.filter(b => {
+      try { const p = JSON.parse(b.metadata || "{}").page || 0; return p >= cp - 2 && p <= cp + 2; }
+      catch { return true; }
+    });
+  }, [pageBlocks]);
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
       const blocks = await invoke<Block[]>("get_block_chunk", { id: nodeId });
@@ -525,7 +540,7 @@ function App() {
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
+                <BlockEditor block={activeBlock} pageBlocks={visibleBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
                   onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
                   onHoverBlock={(b) => {
                     const iframe = pdfIframeRef.current?.contentWindow;
@@ -539,7 +554,7 @@ function App() {
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <div className="md-preview-panel">
-                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
+                  <MarkdownPreview blocks={visibleBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
                 </div>
               </div>
             </div>
