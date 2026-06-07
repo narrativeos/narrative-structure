@@ -253,7 +253,7 @@ break;
 }}
 }}
 }}
-window.parent.postMessage({{type:'bbox-pos',page:e.data.page,bboxes:results}},'*');
+window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.left,top:pr.top,width:pr.width,height:pr.height}},ifrScrollY:window.scrollY,ifrInnerH:window.innerHeight,bboxes:results}},'*');
 }}
 }});
 </script></body></html>"#,

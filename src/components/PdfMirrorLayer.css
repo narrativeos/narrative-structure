@@ -3,6 +3,7 @@
   top: 0;
   left: 0;
   width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 50;
 }
@@ -11,6 +12,14 @@
   position: absolute;
   pointer-events: auto;
   cursor: default;
-  border: 1px dashed rgba(251,191,36,0.6);
-  background: rgba(251,191,36,0.08);
+  border: 2px solid rgba(251,191,36,0.35);
+  background: rgba(251,191,36,0.06);
+}
+
+.mirror-page-frame {
+  position: absolute;
+  pointer-events: none;
+  border: 2px solid rgba(98, 114, 164, 0.4);
+  background: rgba(98, 114, 164, 0.03);
+  border-radius: 2px;
 }

@@ -1,14 +1,17 @@
 import { useEffect, useState, useRef, forwardRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import PdfMirrorLayer, { MirrorBbox } from "./PdfMirrorLayer";
 import "./PdfViewer.css";
 
 interface PdfViewerProps {
   projectPath: string;
   onPageChange?: (page: number) => void;
+  mirrorBboxes?: MirrorBbox[];
+  pageRect?: { left: number; top: number; width: number; height: number } | null;
 }
 
 const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
-  function PdfViewer({ projectPath, onPageChange }, ref) {
+  function PdfViewer({ projectPath, onPageChange, mirrorBboxes, pageRect }, ref) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -77,6 +80,7 @@ const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
     <div className="pdf-viewer">
       <div className="pdf-content">
         <iframe ref={setRef} src={pdfUrl} className="pdf-embed" title="PDF Preview" />
+        <PdfMirrorLayer bboxes={mirrorBboxes || []} pageRect={pageRect} />
       </div>
     </div>
   );

@@ -10,13 +10,25 @@ export interface MirrorBbox {
 
 interface Props {
   bboxes: MirrorBbox[];
+  pageRect?: { left: number; top: number; width: number; height: number } | null;
 }
 
-export default function PdfMirrorLayer({ bboxes }: Props) {
-  if (!bboxes.length) return null;
+export default function PdfMirrorLayer({ bboxes, pageRect }: Props) {
+  if (!bboxes.length && !pageRect) return null;
 
   return (
     <div className="pdf-mirror-layer">
+      {pageRect && (
+        <div
+          className="mirror-page-frame"
+          style={{
+            left: pageRect.left,
+            top: pageRect.top,
+            width: pageRect.width,
+            height: pageRect.height,
+          }}
+        />
+      )}
       {bboxes.map((bb) => (
         <div
           key={bb.id}

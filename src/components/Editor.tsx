@@ -14,11 +14,12 @@ interface EditorProps {
   pageBlocks: Block[] | null;
   onChange: (blockId: string, content: string, version: number) => void;
   onHoverBlock?: (block: Block | null) => void;
+  currentPage?: number;
 }
 
 const DEBOUNCE_MS = 800;
 
-export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock }: EditorProps) {
+export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock, currentPage }: EditorProps) {
   const [leftMode, setLeftMode] = useState<LeftMode>("edit");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versionRef = useRef(0);
@@ -85,7 +86,7 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock 
         </div>
         <div className="page-blocks-list">
           {groups.map((g, gi) => (
-            <div key={gi} className="page-group">
+            <div key={gi} className={`page-group${currentPage === g.page ? ' page-group-active' : ''}`}>
               <div className="page-group-header">— p{g.page} —</div>
               {g.blocks.map((b) => (
                 <div key={b.id} className={`page-block-row ${b.block_type}`} data-block-id={b.id}

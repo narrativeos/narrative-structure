@@ -33,6 +33,16 @@ export default function LinesLayer({ lines }: LinesLayerProps) {
         >
           <circle cx="3" cy="3" r="2.5" fill="currentColor" />
         </marker>
+        <marker
+          id="line-start"
+          viewBox="0 0 6 6"
+          refX="3"
+          refY="3"
+          markerWidth="5"
+          markerHeight="5"
+        >
+          <circle cx="3" cy="3" r="2.5" fill="currentColor" />
+        </marker>
       </defs>
       {lines.map((l) => {
         const dx = l.x2 - l.x1;
@@ -44,9 +54,10 @@ export default function LinesLayer({ lines }: LinesLayerProps) {
             d={d}
             fill="none"
             stroke={l.color}
-            strokeWidth={l.active ? 2 : 0.6}
+            strokeWidth={l.active ? 2.5 : 0.6}
             strokeDasharray={l.active ? "none" : "4,3"}
-            opacity={l.active ? 0.9 : 0.25}
+            opacity={l.active ? 0.95 : 0.25}
+            markerStart={l.active ? "url(#line-start)" : undefined}
             markerEnd={l.active ? "url(#line-arrow)" : undefined}
             className={l.active ? "line-active" : ""}
           />

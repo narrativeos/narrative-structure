@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
-import PdfMirrorLayer, { MirrorBbox } from "./components/PdfMirrorLayer";
+import type { MirrorBbox } from "./components/PdfMirrorLayer";
 import MarkdownPreview from "./components/MarkdownPreview";
 import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
@@ -79,26 +79,30 @@ function App() {
   const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
   const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
+  const [pageRect, setPageRect] = useState<{left:number;top:number;width:number;height:number}|null>(null);
   const currentPageRef = useRef(1);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importLogs, setImportLogs] = useState<string[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const bboxRequestIdRef = useRef(0);
+  const pageTextsRef = useRef<string[]>([]);
+  const scrollBboxTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
-    setMirrorBboxes([]); setLines([]);
+    setMirrorBboxes([]); setLines([]); setPageRect(null);
     if (!pageBlocks?.length) return;
     const iframe = pdfIframeRef.current?.contentWindow;
     if (!iframe) return;
+    const page = currentPageRef.current;
+    const pageTexts = pageBlocks
+      .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
+      .filter(b => b.block_type !== 'empty' && b.content.trim())
+      .map(b => b.content);
+    pageTextsRef.current = pageTexts;
+    if (!pageTexts.length) return;
     const reqId = ++bboxRequestIdRef.current;
     const timer = setTimeout(() => {
-      const page = currentPageRef.current;
-      const pageTexts = pageBlocks
-        .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
-        .filter(b => b.block_type !== 'empty' && b.content.trim())
-        .map(b => b.content);
-      if (!pageTexts.length) return;
       (window as any).__flyRows = pageBlocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
       (window as any).__flyReqId = reqId;
       iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
@@ -121,23 +125,38 @@ function App() {
         newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + r1.height/2 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: '#fbbf24', active: true });
       });
       setLines(newLines);
-    };
+      if (newLines.length) console.log("[mirror] lines:", newLines.length, "first:", JSON.stringify({x1:newLines[0].x1,y1:newLines[0].y1,x2:newLines[0].x2,y2:newLines[0].y2}));    };
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
+        // 滚动时也刷新 bbox 位置（debounce 300ms）
+        const iframeWin = pdfIframeRef.current?.contentWindow;
+        const texts = pageTextsRef.current;
+        if (iframeWin && texts.length) {
+          clearTimeout(scrollBboxTimerRef.current);
+          const reqId = ++bboxRequestIdRef.current;
+          scrollBboxTimerRef.current = setTimeout(() => {
+            (window as any).__flyReqId = reqId;
+            iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
+          }, 150);
+        }
         return;
       }
       const reqId = (window as any).__flyReqId;
-      if (reqId !== undefined && reqId !== bboxRequestIdRef.current) return;      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
+      if (reqId !== undefined && reqId !== bboxRequestIdRef.current) return;
+      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
       const rows: any[] = (window as any).__flyRows || [];
-      setMirrorBboxes(e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id));      requestAnimationFrame(drawAllLines);
+      const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id);
+      if (e.data.pageRect) setPageRect(e.data.pageRect);
+      setMirrorBboxes(bboxes);
+      requestAnimationFrame(drawAllLines);
     };
     window.addEventListener('message', handler);
     let scrollEl: Element | null = null;
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
     const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
-    return () => { window.removeEventListener('message', handler); clearInterval(timer); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
+    return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
   }, []);
 
   // 可拖拽面板尺寸
@@ -477,12 +496,11 @@ function App() {
           {/* 中间三列：PDF | Block列表 | Markdown编辑器（等宽） */}
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
-              <div className="wb-col" style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
-                <PdfMirrorLayer bboxes={mirrorBboxes} />
+              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
+                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange}
+                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
                   onHoverBlock={(b) => {
                     const iframe = pdfIframeRef.current?.contentWindow;
                     if (b && b.block_type !== 'empty' && b.content.trim()) {
