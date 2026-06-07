@@ -87,6 +87,7 @@ function App() {
   const bboxRequestIdRef = useRef(0);
   const pageTextsRef = useRef<string[]>([]);
   const scrollBboxTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const drawLinesRef = useRef<() => void>();
 
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
@@ -135,10 +136,11 @@ function App() {
         el.classList.forEach(c => { if (typeColor[c]) btype = c; });
         if (btype === prevType) { alt = !alt; } else { alt = false; prevType = btype; }
         const colors = typeColor[btype] || ['#fbbf24', '#fcd34d'];
-        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + r1.height/2 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: colors[alt ? 1 : 0], active: true });
+        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + 6 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: colors[alt ? 1 : 0], active: true });
       });
       setLines(newLines);
     };
+    drawLinesRef.current = drawAllLines;
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
@@ -514,6 +516,7 @@ function App() {
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
+                  onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
                   onHoverBlock={(b) => {
                     const iframe = pdfIframeRef.current?.contentWindow;
                     if (b && b.block_type !== 'empty' && b.content.trim()) {

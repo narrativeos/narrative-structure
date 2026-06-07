@@ -14,13 +14,15 @@ interface EditorProps {
   pageBlocks: Block[] | null;
   onChange: (blockId: string, content: string, version: number) => void;
   onHoverBlock?: (block: Block | null) => void;
+  onBlockToggle?: () => void;
   currentPage?: number;
 }
 
 const DEBOUNCE_MS = 800;
 
-export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock, currentPage }: EditorProps) {
+export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock, onBlockToggle, currentPage }: EditorProps) {
   const [leftMode, setLeftMode] = useState<LeftMode>("edit");
+  const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const versionRef = useRef(0);
   const editRef = useRef<string>("");
@@ -88,14 +90,20 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
           {groups.map((g, gi) => (
             <div key={gi} className={`page-group${currentPage === g.page ? ' page-group-active' : ''}`}>
               <div className="page-group-header">— p{g.page} —</div>
-              {g.blocks.map((b) => (
-                <div key={b.id} className={`page-block-row ${b.block_type}`} data-block-id={b.id}
+              {g.blocks.map((b) => {
+                const isLong = b.content && b.content.length > 60;
+                const expanded = expandedBlocks.has(b.id);
+                return (
+                <div key={b.id} className={`page-block-row ${b.block_type}${isLong && !expanded ? ' clamped' : ''}${expanded ? ' expanded' : ''}`} data-block-id={b.id}
                   onMouseEnter={() => onHoverBlock?.(b)}
-                  onMouseLeave={() => onHoverBlock?.(null)}>
+                  onMouseLeave={() => onHoverBlock?.(null)}
+                  onClick={() => { if (isLong) { setExpandedBlocks(prev => { const next = new Set(prev); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; }); setTimeout(() => onBlockToggle?.(), 0); } }}>
                   <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
                   <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
+                  {isLong && <span className="pbr-toggle">{expanded ? '▲' : '▼'}</span>}
                 </div>
-              ))}
+                );
+              })}
             </div>
           ))}
         </div>
