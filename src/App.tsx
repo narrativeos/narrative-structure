@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
+import PdfMirrorLayer, { MirrorBbox } from "./components/PdfMirrorLayer";
 import MarkdownPreview from "./components/MarkdownPreview";
 import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
@@ -77,103 +78,67 @@ function App() {
   const [projectKey, setProjectKey] = useState(0);
   const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
+  const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
+  const [mirrorScrollY, setMirrorScrollY] = useState(0);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importLogs, setImportLogs] = useState<string[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
-  const flyDataRef = useRef<{ bboxes: any[]; wsRect: DOMRect; iframeRect: DOMRect } | null>(null);
 
-  // pageBlocks 变化 → 等 DOM 渲染后批量请求 bbox，画所有飞线
+  // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层
   useEffect(() => {
-    if (!pageBlocks?.length) { setLines([]); return; }
+    if (!pageBlocks?.length) { setMirrorBboxes([]); setLines([]); return; }
     const iframe = pdfIframeRef.current?.contentWindow;
     if (!iframe) return;
-
     const timer = setTimeout(() => {
-      const wsRect = workspaceRef.current?.getBoundingClientRect();
-      const iframeRect = pdfIframeRef.current?.getBoundingClientRect();
-      if (!wsRect || !iframeRect) return;
-
-      const rows: { id: string; content: string; page: number; rect: DOMRect }[] = [];
-      document.querySelectorAll('[data-block-id]').forEach(el => {
-        const id = el.getAttribute('data-block-id')!;
-        const block = pageBlocks!.find(b => b.id === id);
-        if (block && block.block_type !== 'empty' && block.content.trim()) {
-          rows.push({ id, content: block.content, page: 1, rect: el.getBoundingClientRect() });
-          try { rows[rows.length-1].page = JSON.parse(block.metadata || "{}").page || 1; } catch {}
+      const rows: { id: string; content: string; page: number }[] = [];
+      pageBlocks.forEach(b => {
+        if (b.block_type !== 'empty' && b.content.trim()) {
+          rows.push({ id: b.id, content: b.content, page: 1 });
+          try { rows[rows.length-1].page = JSON.parse(b.metadata || "{}").page || 1; } catch {}
         }
       });
       if (!rows.length) return;
-
       const pageMap = new Map<number, string[]>();
-      rows.forEach(r => {
-        if (!pageMap.has(r.page)) pageMap.set(r.page, []);
-        pageMap.get(r.page)!.push(r.content);
-      });
-
+      rows.forEach(r => { if (!pageMap.has(r.page)) pageMap.set(r.page, []); pageMap.get(r.page)!.push(r.content); });
       (window as any).__flyRows = rows;
-      (window as any).__flyWsRect = wsRect;
-      (window as any).__flyIframeRect = iframeRect;
-
-      pageMap.forEach((texts, page) => {
-        iframe.postMessage({ type: "get-bbox-pos", page, texts }, "*");
-      });
+      pageMap.forEach((texts, page) => { iframe.postMessage({ type: "get-bbox-pos", page, texts }, "*"); });
     }, 200);
     return () => clearTimeout(timer);
   }, [pageBlocks]);
 
-  // 接收 bbox-pos → 存储数据 + 批量画线
+  // 接收 bbox-pos → mirror 层 + 飞线；接收 scroll-offset → mirror 滚动
   useEffect(() => {
-    let scrollEl: Element | null = null;
-
-    const drawLines = () => {
-      const data = flyDataRef.current;
-      if (!data) return;
-      const { bboxes, wsRect, iframeRect } = data;
-      const rows: { id: string; rect: DOMRect }[] = [];
-      document.querySelectorAll('[data-block-id]').forEach(el => {
-        rows.push({ id: el.getAttribute('data-block-id')!, rect: el.getBoundingClientRect() });
-      });
+    const drawAllLines = () => {
+      const wsRect = workspaceRef.current?.getBoundingClientRect();
+      if (!wsRect) return;
       const newLines: LineDef[] = [];
-      bboxes.forEach((bb: any) => {
-        const row = rows.find(r => r.id === bb._blockId);
-        if (!row) return;
-        newLines.push({
-          id: `line-${row.id}`,
-          x1: row.rect.left - wsRect.left,
-          y1: row.rect.top + row.rect.height / 2 - wsRect.top,
-          x2: iframeRect.left + bb.x + bb.w - wsRect.left,
-          y2: iframeRect.top + bb.y + bb.h / 2 - wsRect.top,
-          color: '#fbbf24', active: true,
-        });
+      document.querySelectorAll('[data-block-id]').forEach(el => {
+        const id = el.getAttribute('data-block-id')!;
+        const mirrorEl = document.querySelector(`[data-mirror-id="${id}"]`);
+        if (!mirrorEl) return;
+        const r1 = el.getBoundingClientRect();
+        const r2 = mirrorEl.getBoundingClientRect();
+        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + r1.height/2 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: '#fbbf24', active: true });
       });
       setLines(newLines);
     };
-
+    let rafId = 0;
     const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'pdf-scroll-offset') {
+        setMirrorScrollY(e.data.scrollY || 0);
+        cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
+        return;
+      }
       if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
       const rows: any[] = (window as any).__flyRows || [];
-      const wsRect: DOMRect = (window as any).__flyWsRect;
-      const iframeRect: DOMRect = (window as any).__flyIframeRect;
-      if (!rows.length || !wsRect || !iframeRect) return;
-
-      // 给每个 bbox 标记对应的 block ID
-      const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({
-        ...bb, _blockId: rows[bi]?.id || ''
-      }));
-      flyDataRef.current = { bboxes, wsRect, iframeRect };
-      drawLines();
-
-      // 绑定 block 列表滚动事件
-      if (!scrollEl) {
-        scrollEl = document.querySelector('.page-blocks-list');
-        if (scrollEl) scrollEl.addEventListener('scroll', drawLines, { passive: true });
-      }
+      setMirrorBboxes(e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || '' })).filter((bb: MirrorBbox) => bb.id));
+      requestAnimationFrame(drawAllLines);
     };
     window.addEventListener('message', handler);
-    return () => {
-      window.removeEventListener('message', handler);
-      if (scrollEl) scrollEl.removeEventListener('scroll', drawLines);
-    };
+    let scrollEl: Element | null = null;
+    const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
+    const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
+    return () => { window.removeEventListener('message', handler); clearInterval(timer); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
   }, []);
 
   // 可拖拽面板尺寸
@@ -515,8 +480,9 @@ function App() {
           {/* 中间三列：PDF | Block列表 | Markdown编辑器（等宽） */}
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
-              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
+              <div className="wb-col" style={{ flex: 1, minWidth: 0, position: "relative" }}>
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
+                <PdfMirrorLayer bboxes={mirrorBboxes} scrollY={mirrorScrollY} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange}

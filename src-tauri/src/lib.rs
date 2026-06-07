@@ -211,6 +211,7 @@ window.parent.postMessage({{type:'pdf-page',page:p}},'*');
 }}
 var scrollTimer=null;
 window.addEventListener('scroll',function(){{
+window.parent.postMessage({{type:'pdf-scroll-offset',scrollY:window.scrollY}},'*');
 clearTimeout(scrollTimer);
 scrollTimer=setTimeout(detectCurrentPage,80);
 }},{{passive:true}});
