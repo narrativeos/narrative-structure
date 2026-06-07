@@ -136,7 +136,7 @@ drawOverlay(ov,pn,s);
 pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
 pdfDoc=pdf;
 document.getElementById('indicator').textContent='1 / '+pdf.numPages;
-renderAllPages(pdf);
+renderAllPages(pdf);setTimeout(function(){{detectCurrentPage();}},500);
 }});
 function scrollToPage(num){{
 autoScrolling=true;
@@ -192,10 +192,9 @@ var best=null, bestDist=Infinity;
 var vh=window.innerHeight;
 pages.forEach(function(el){{
 var rect=el.getBoundingClientRect();
-// 找 top 最接近视口顶部 20% 位置的页面
-var target=vh*0.2;
-var dist=Math.abs(rect.top-target);
-if(dist<bestDist){{bestDist=dist;best=el;}}
+// 找第一个顶部在视口内的页面（top >= 0 且 top < vh/2）
+var inView=(rect.top>=0&&rect.top<vh*0.5)||(rect.top<=0&&rect.bottom>vh*0.1);
+if(inView&&(rect.top<bestDist||bestDist===Infinity)){{bestDist=rect.top;best=el;}}
 }});
 if(best){{
 var id=best.id;
@@ -211,9 +210,9 @@ window.parent.postMessage({{type:'pdf-page',page:p}},'*');
 }}
 var scrollTimer=null;
 window.addEventListener('scroll',function(){{
-window.parent.postMessage({{type:'pdf-scroll-offset',scrollY:window.scrollY}},'*');
+window.parent.postMessage({{type:'pdf-scroll-offset',scrollY:window.scrollY,page:currentPage}},'*');
 clearTimeout(scrollTimer);
-scrollTimer=setTimeout(detectCurrentPage,80);
+scrollTimer=setTimeout(detectCurrentPage,100);
 }},{{passive:true}});
 window.addEventListener('message',function(e){{
 if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);

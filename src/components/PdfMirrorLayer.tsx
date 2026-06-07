@@ -10,14 +10,13 @@ export interface MirrorBbox {
 
 interface Props {
   bboxes: MirrorBbox[];
-  scrollY: number;
 }
 
-export default function PdfMirrorLayer({ bboxes, scrollY }: Props) {
+export default function PdfMirrorLayer({ bboxes }: Props) {
   if (!bboxes.length) return null;
 
   return (
-    <div className="pdf-mirror-layer" style={{ transform: `translateY(${-scrollY}px)` }}>
+    <div className="pdf-mirror-layer">
       {bboxes.map((bb) => (
         <div
           key={bb.id}

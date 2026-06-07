@@ -79,29 +79,29 @@ function App() {
   const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
   const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
-  const [mirrorScrollY, setMirrorScrollY] = useState(0);
+  const currentPageRef = useRef(1);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importLogs, setImportLogs] = useState<string[]>([]);
   const workspaceRef = useRef<HTMLDivElement>(null);
+  const bboxRequestIdRef = useRef(0);
 
-  // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层
+  // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
-    if (!pageBlocks?.length) { setMirrorBboxes([]); setLines([]); return; }
+    setMirrorBboxes([]); setLines([]);
+    if (!pageBlocks?.length) return;
     const iframe = pdfIframeRef.current?.contentWindow;
     if (!iframe) return;
+    const reqId = ++bboxRequestIdRef.current;
     const timer = setTimeout(() => {
-      const rows: { id: string; content: string; page: number }[] = [];
-      pageBlocks.forEach(b => {
-        if (b.block_type !== 'empty' && b.content.trim()) {
-          rows.push({ id: b.id, content: b.content, page: 1 });
-          try { rows[rows.length-1].page = JSON.parse(b.metadata || "{}").page || 1; } catch {}
-        }
-      });
-      if (!rows.length) return;
-      const pageMap = new Map<number, string[]>();
-      rows.forEach(r => { if (!pageMap.has(r.page)) pageMap.set(r.page, []); pageMap.get(r.page)!.push(r.content); });
-      (window as any).__flyRows = rows;
-      pageMap.forEach((texts, page) => { iframe.postMessage({ type: "get-bbox-pos", page, texts }, "*"); });
+      const page = currentPageRef.current;
+      const pageTexts = pageBlocks
+        .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
+        .filter(b => b.block_type !== 'empty' && b.content.trim())
+        .map(b => b.content);
+      if (!pageTexts.length) return;
+      (window as any).__flyRows = pageBlocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
+      (window as any).__flyReqId = reqId;
+      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
     }, 200);
     return () => clearTimeout(timer);
   }, [pageBlocks]);
@@ -125,14 +125,13 @@ function App() {
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
-        setMirrorScrollY(e.data.scrollY || 0);
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
         return;
       }
-      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
+      const reqId = (window as any).__flyReqId;
+      if (reqId !== undefined && reqId !== bboxRequestIdRef.current) return;      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
       const rows: any[] = (window as any).__flyRows || [];
-      setMirrorBboxes(e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || '' })).filter((bb: MirrorBbox) => bb.id));
-      requestAnimationFrame(drawAllLines);
+      setMirrorBboxes(e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id));      requestAnimationFrame(drawAllLines);
     };
     window.addEventListener('message', handler);
     let scrollEl: Element | null = null;
@@ -310,12 +309,10 @@ function App() {
 
   // PDF 翻页 → 加载当前页 ±1 页所有行块，清除飞线
   const handlePageChange = useCallback(async (page: number) => {
-    setLines([]);
+    currentPageRef.current = page;
+    setMirrorBboxes([]); setLines([]);
     try {
-      const blocks = await invoke<Block[]>("get_blocks_by_page", {
-        pageStart: Math.max(1, page - 1),
-        pageEnd: page + 1,
-      });
+      const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart: Math.max(1, page - 2), pageEnd: page + 2 });
       if (blocks.length > 0) {
         setPageBlocks(blocks);
         setActiveBlock(null);
@@ -482,7 +479,7 @@ function App() {
             <div className="workbench-split" id="workbench-split">
               <div className="wb-col" style={{ flex: 1, minWidth: 0, position: "relative" }}>
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} />
-                <PdfMirrorLayer bboxes={mirrorBboxes} scrollY={mirrorScrollY} />
+                <PdfMirrorLayer bboxes={mirrorBboxes} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange}

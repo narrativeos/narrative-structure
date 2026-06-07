@@ -11,4 +11,6 @@
   position: absolute;
   pointer-events: auto;
   cursor: default;
+  border: 1px dashed rgba(251,191,36,0.6);
+  background: rgba(251,191,36,0.08);
 }
