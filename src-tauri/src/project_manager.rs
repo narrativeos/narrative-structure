@@ -148,14 +148,46 @@ fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> 
     None
 }
 
+fn emit_stage_progress(app_handle: &tauri::AppHandle, stage: &str, index: usize, total: usize, min_percent: u8, max_percent: u8, detail: &str) {
+    let percent = if total == 0 {
+        max_percent
+    } else {
+        let ratio = ((index + 1) as f64 / total as f64).min(1.0);
+        let value = min_percent as f64 + ratio * (max_percent.saturating_sub(min_percent)) as f64;
+        value.round().clamp(min_percent as f64, max_percent as f64) as u8
+    };
+    page_mapper::emit_progress(app_handle, stage, percent, detail);
+}
+
 /// 发送进度事件到前端
 /// 流程: 解压 → 以时间戳创建项目目录 → 初始化 DB → 解析 MD → 打开项目
 #[tauri::command]
-pub fn import_new_project(
+pub async fn import_new_project(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, ProjectState>,
     zip_path: String,
 ) -> Result<String, String> {
+    let app_handle = app_handle.clone();
+    let state = state.clone();
+    let app_handle_for_thread = app_handle.clone();
+    let (result_text, project_dir) = tauri::async_runtime::spawn_blocking(move || import_new_project_blocking(app_handle_for_thread, zip_path))
+        .await
+        .map_err(|e| format!("导入线程失败: {}", e))??;
+
+    page_mapper::emit_progress(&app_handle, "项目准备", 99, "加载项目中...");
+    let log_path = project_dir.join("import.log");
+    page_mapper::emit_log(&app_handle, "[import] 项目准备: 开始打开项目并连接数据库", Some(&log_path));
+    open_project_inner(&state, project_dir.clone())?;
+    page_mapper::emit_log(&app_handle, "[import] 项目已打开，导入完成", Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "完成", 100, "项目就绪");
+
+    Ok(result_text)
+}
+
+fn import_new_project_blocking(
+    app_handle: tauri::AppHandle,
+    zip_path: String,
+) -> Result<(String, PathBuf), String> {
     let zip_file = PathBuf::from(&zip_path);
     if !zip_file.exists() {
         return Err(format!("文件不存在: {}", zip_path));
@@ -168,11 +200,13 @@ pub fn import_new_project(
         .unwrap_or("untitled");
 
     let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
-    page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0));
+    page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0), None);
 
     // 项目文件夹 = <project_root>/Projects/<timestamp_id>/
     let project_id = timestamp_id();
     let project_dir = project_root_dir().join("Projects").join(&project_id);
+    let log_path = project_dir.join("import.log");
+    page_mapper::emit_log(&app_handle, &format!("[import] 项目目录: {}", project_dir.display()), Some(&log_path));
 
     fs::create_dir_all(project_dir.join("assets"))
         .map_err(|e| format!("无法创建目录: {}", e))?;
@@ -193,8 +227,8 @@ pub fn import_new_project(
 
     let mut md_content: Option<String> = None;
     let total_entries = archive.len();
-    page_mapper::emit_log(&app_handle, &format!("[import] ZIP 包含 {} 个条目，开始解压...", total_entries));
-    page_mapper::emit_progress(&app_handle, "解压 ZIP", 5, &format!("共 {} 个文件", total_entries));
+    page_mapper::emit_log(&app_handle, &format!("[import] ZIP 包含 {} 个条目，开始解压...", total_entries), Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 1, &format!("共 {} 个文件", total_entries));
 
     // 先扫描所有条目，检测是否有公共前缀目录（如 GitHub zip 的 project-main/）
     let mut common_prefix = String::new();
@@ -213,13 +247,14 @@ pub fn import_new_project(
         }
     }
     if !common_prefix.is_empty() {
-        page_mapper::emit_log(&app_handle, &format!("[import] 检测到公共前缀目录: {}/", common_prefix));
+        page_mapper::emit_log(&app_handle, &format!("[import] 检测到公共前缀目录: {}/", common_prefix), Some(&log_path));
     }
 
     let mut pdf_count = 0u32;
     let mut img_count = 0u32;
     let mut json_count = 0u32;
     let mut other_count = 0u32;
+    let extract_progress_interval = (total_entries / 20).max(25);
 
     for i in 0..total_entries {
         let mut entry = archive.by_index(i)
@@ -258,50 +293,57 @@ pub fn import_new_project(
         if lower.ends_with(".md") && md_content.is_none() {
             md_content = Some(String::from_utf8_lossy(&buf).to_string());
         }
+
+        if i % extract_progress_interval == 0 || i + 1 == total_entries {
+            let progress = 10 + ((i as f64 / total_entries as f64) * 20.0).round() as u8;
+            page_mapper::emit_progress(&app_handle, "解压 ZIP", progress.min(29), &format!("解压文件 {}/{}", i + 1, total_entries));
+        }
     }
 
     page_mapper::emit_log(&app_handle, &format!(
         "[import] 解压完成: PDF×{} 图片×{} JSON×{} 其他×{} → {}",
         pdf_count, img_count, json_count, other_count, assets_subdir.display()
-    ));
+    ), Some(&log_path));
 
     // 初始化 narrative.db
-    page_mapper::emit_progress(&app_handle, "初始化数据库", 30, "创建表结构...");
+    page_mapper::emit_log(&app_handle, "[import] 初始化数据库...", Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "初始化数据库", 4, "创建表结构...");
     let db_path = project_dir.join("narrative.db");
-    {
-        let conn = Connection::open(&db_path)
-            .map_err(|e| format!("无法创建数据库: {}", e))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
+    let conn = Connection::open(&db_path)
+        .map_err(|e| format!("无法创建数据库: {}", e))?;
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
              PRAGMA foreign_keys=ON;
              PRAGMA busy_timeout=5000;",
-        )
-        .map_err(|e| format!("PRAGMA 设置失败: {}", e))?;
-        conn.execute_batch(DB_SCHEMA)
-            .map_err(|e| format!("建表失败: {}", e))?;
+    )
+    .map_err(|e| format!("PRAGMA 设置失败: {}", e))?;
+    conn.execute_batch(DB_SCHEMA)
+        .map_err(|e| format!("建表失败: {}", e))?;
 
-        // Markdown 行级分块 → 基于 _middle.json bbox 文本匹配页码 → 写入 DB
-        if let Some(ref md) = md_content {
-            page_mapper::emit_log(&app_handle, &format!("[import] MD 大小: {} bytes", md.len()));
-            page_mapper::emit_progress(&app_handle, "解析 Markdown", 35, "行级分块...");
+    // Markdown 行级分块 → 基于 _middle.json bbox 文本匹配页码 → 写入 DB
+    if let Some(ref md) = md_content {
+            page_mapper::emit_log(&app_handle, &format!("[import] MD 大小: {} bytes", md.len()), Some(&log_path));
+            page_mapper::emit_progress(&app_handle, "解析 Markdown", 5, "行级分块...");
             let mut parsed = parse_markdown(md);
             let line_count = parsed.len();
             page_mapper::emit_log(&app_handle, &format!("[import] 解析完成: {} 行 (headings: {})", line_count,
-                parsed.iter().filter(|b| b.block_type == "heading").count()));
+                parsed.iter().filter(|b| b.block_type == "heading").count()), Some(&log_path));
 
             if !parsed.is_empty() {
                 // 页码映射: bbox span 文本 → MD 行匹配
                 let assets_dir = project_dir.join("assets");
                 if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-                    page_mapper::emit_progress(&app_handle, "加载信息层", 40, "展开 _middle.json bbox...");
+                    page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
                     page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed);
+                    page_mapper::emit_log(&app_handle, "[import] 信息层加载完成", Some(&log_path));
                 }
 
-                page_mapper::emit_progress(&app_handle, "写入数据库", 90, &format!("共 {} 行", line_count));
+                page_mapper::emit_log(&app_handle, "[import] 写入数据库阶段开始", Some(&log_path));
+                emit_stage_progress(&app_handle, "写入数据库", 0, line_count, 90, 94, &format!("共 {} 行", line_count));
                 conn.execute("BEGIN", []).map_err(|e| format!("事务失败: {}", e))?;
                 for (idx, block) in parsed.iter().enumerate() {
-                    if idx % 100 == 0 {
-                        page_mapper::emit_progress(&app_handle, "写入数据库", 90 + ((idx as u8).saturating_mul(9).saturating_div(line_count as u8)), "");
+                    if idx % 100 == 0 || idx + 1 == line_count {
+                        emit_stage_progress(&app_handle, "写入数据库", idx, line_count, 90, 94, "");
                     }
                     conn.execute(
                         "INSERT INTO blocks (id, parent_id, order_idx, level, block_type, content, original_content, metadata)
@@ -314,30 +356,18 @@ pub fn import_new_project(
                     .map_err(|e| format!("插入块失败: {}", e))?;
                 }
                 conn.execute("COMMIT", []).map_err(|e| format!("提交失败: {}", e))?;
-                page_mapper::emit_log(&app_handle, &format!("[import] DB 写入完成: {} 行", line_count));
+                page_mapper::emit_log(&app_handle, "[import] 写入数据库阶段完成", Some(&log_path));
+                page_mapper::emit_log(&app_handle, &format!("[import] DB 写入完成: {} 行", line_count), Some(&log_path));
             }
         }
-    }
 
-    // 打开项目
-    open_project_inner(&state, project_dir.clone())?;
+    let block_count: i32 = conn.query_row("SELECT COUNT(*) FROM blocks", [], |r| r.get(0))
+        .unwrap_or(0);
 
-    page_mapper::emit_progress(&app_handle, "完成", 100, "项目就绪");
-
-    let block_count: i32 = {
-        let guard = state.db_conn.lock().unwrap();
-        if let Some(ref conn) = *guard {
-            conn.query_row("SELECT COUNT(*) FROM blocks", [], |r| r.get(0))
-                .unwrap_or(0)
-        } else {
-            0
-        }
-    };
-
-    Ok(format!(
+    Ok((format!(
         "{} | {} 个语义块 | {}",
         project_name, block_count, project_dir.display()
-    ))
+    ), project_dir))
 }
 
 /// 打开一个项目: 验证路径 → 连接数据库 → 应用 PRAGMA
@@ -420,18 +450,29 @@ pub fn close_project(state: tauri::State<'_, ProjectState>) -> Result<String, St
 
 /// 导入 MinerU 输出 zip 包: 解压 → 复制到 assets/ → 解析 .md → 写入 blocks
 #[tauri::command]
-pub fn import_document(
+pub async fn import_document(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, ProjectState>,
     zip_path: String,
 ) -> Result<String, String> {
-    let conn_guard = state.db_conn.lock().map_err(|e| e.to_string())?;
-    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
-
+    let app_handle = app_handle.clone();
     let project_path = {
         let path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
-        path_guard.clone().ok_or("项目路径未设置")?
+        path_guard.clone().ok_or_else(|| "项目路径未设置".to_string())?
     };
+
+    tauri::async_runtime::spawn_blocking(move || import_document_blocking(app_handle, project_path, zip_path))
+        .await
+        .map_err(|e| format!("导入线程失败: {}", e))?
+}
+
+fn import_document_blocking(
+    app_handle: tauri::AppHandle,
+    project_path: PathBuf,
+    zip_path: String,
+) -> Result<String, String> {
+    let conn = Connection::open(project_path.join("narrative.db"))
+        .map_err(|e| format!("无法打开数据库: {}", e))?;
 
     let zip_file = PathBuf::from(&zip_path);
     if !zip_file.exists() {
@@ -439,8 +480,9 @@ pub fn import_document(
     }
 
     let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
+    let log_path = project_path.join("import.log");
 
-    page_mapper::emit_progress(&app_handle, "解压 ZIP", 5, "读取压缩包...");
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 1, "读取压缩包...");
 
     // 1. 读取 zip
     let file = fs::File::open(&zip_file)
@@ -454,17 +496,19 @@ pub fn import_document(
         .and_then(|s| s.to_str())
         .unwrap_or("imported_doc");
 
-    page_mapper::emit_log(&app_handle, &format!("[import-doc] 开始追加导入: {} ({:.1} MB)", doc_name, zip_size as f64 / 1_048_576.0));
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] 开始追加导入: {} ({:.1} MB)", doc_name, zip_size as f64 / 1_048_576.0), Some(&log_path));
 
     let assets_dir = project_path.join("assets").join(doc_name);
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] 资源目录: {}", assets_dir.display()), Some(&log_path));
     fs::create_dir_all(&assets_dir)
         .map_err(|e| format!("无法创建资源目录: {}", e))?;
 
     // 3. 解压所有文件到 assets/<doc_name>/
     let mut md_content: Option<String> = None;
     let total_entries = archive.len();
-    page_mapper::emit_log(&app_handle, &format!("[import-doc] ZIP 包含 {} 个条目，解压中...", total_entries));
-    page_mapper::emit_progress(&app_handle, "解压 ZIP", 10, &format!("共 {} 个文件", total_entries));
+    let extract_progress_interval = (total_entries / 20).max(25);
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] ZIP 包含 {} 个条目，解压中...", total_entries), Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 1, &format!("共 {} 个文件", total_entries));
 
     for i in 0..total_entries {
         let mut entry = archive.by_index(i)
@@ -497,9 +541,16 @@ pub fn import_document(
         if file_name.ends_with(".md") && md_content.is_none() {
             md_content = Some(String::from_utf8_lossy(&buf).to_string());
         }
+
+        if i % extract_progress_interval == 0 || i + 1 == total_entries {
+            let progress = 1 + ((i as f64 / total_entries as f64) * 2.0).round() as u8;
+            page_mapper::emit_progress(&app_handle, "解压 ZIP", progress.min(3), &format!("解压文件 {}/{}", i + 1, total_entries));
+        }
     }
 
-    page_mapper::emit_progress(&app_handle, "解析 Markdown", 35, "行级分块...");
+    page_mapper::emit_progress(&app_handle, "解压 ZIP", 3, "解压完成，继续解析 Markdown...");
+    page_mapper::emit_log(&app_handle, "[import-doc] 解压完成，开始解析 Markdown", Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "解析 Markdown", 5, "行级分块...");
 
     // 4. Markdown 行级分块 → 页码映射
     let md_text = md_content.ok_or("zip 中未找到 .md 文件")?;
@@ -514,12 +565,14 @@ pub fn import_document(
 
     // 基于 _middle.json bbox span 文本 → MD 行匹配页码
     if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-        page_mapper::emit_progress(&app_handle, "加载信息层", 40, "展开 _middle.json bbox...");
+        page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
+        page_mapper::emit_log(&app_handle, "[import-doc] 开始加载信息层", Some(&log_path));
         page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed_blocks);
+        page_mapper::emit_log(&app_handle, "[import-doc] 信息层加载完成", Some(&log_path));
     }
 
     let block_count = parsed_blocks.len();
-    page_mapper::emit_progress(&app_handle, "写入数据库", 90, &format!("共 {} 行", block_count));
+    emit_stage_progress(&app_handle, "写入数据库", 0, block_count as usize, 90, 94, &format!("共 {} 行", block_count));
 
     // 5. 批量写入数据库（事务）
     conn.execute("BEGIN", [])
@@ -529,8 +582,8 @@ pub fn import_document(
                       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
 
     for (idx, block) in parsed_blocks.iter().enumerate() {
-        if idx % 100 == 0 {
-            page_mapper::emit_progress(&app_handle, "写入数据库", 90 + ((idx as u8).saturating_mul(9).saturating_div(block_count as u8)), "");
+        if idx % 100 == 0 || idx + 1 == block_count {
+            emit_stage_progress(&app_handle, "写入数据库", idx, block_count as usize, 90, 94, "");
         }
         conn.execute(
             insert_sql,
@@ -551,9 +604,13 @@ pub fn import_document(
     conn.execute("COMMIT", [])
         .map_err(|e| format!("事务提交失败: {}", e))?;
 
+    page_mapper::emit_log(&app_handle, "[import-doc] 写入数据库阶段完成", Some(&log_path));
+    page_mapper::emit_log(&app_handle, &format!("[import-doc] 导入完成: {} 个语义块", block_count), Some(&log_path));
+    page_mapper::emit_progress(&app_handle, "项目准备", 99, "写入完成，正在收尾...");
     page_mapper::emit_progress(&app_handle, "完成", 100, &format!("{} 个语义块就绪", block_count));
 
     Ok(format!(
+
         "导入成功: {} 个语义块 → assets/{}/",
         block_count, doc_name
     ))

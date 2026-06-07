@@ -83,6 +83,8 @@ function App() {
   const currentPageRef = useRef(1);
   const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
   const [importLogs, setImportLogs] = useState<string[]>([]);
+  const importStages = ["解压 ZIP", "初始化数据库", "解析 Markdown", "加载信息层", "匹配页码", "写入数据库", "项目准备", "完成"];
+  const importProgressTimer = useRef<number | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const bboxRequestIdRef = useRef(0);
   const pageTextsRef = useRef<string[]>([]);
@@ -241,6 +243,56 @@ function App() {
   // =========================================================================
   // 加载项目
   // =========================================================================
+  const clearImportProgressTimer = useCallback(() => {
+    if (importProgressTimer.current !== null) {
+      window.clearInterval(importProgressTimer.current);
+      importProgressTimer.current = null;
+    }
+  }, []);
+
+  const stageMaxPercent = useCallback((stage: string): number => {
+    switch (stage) {
+      case "解压 ZIP": return 3;
+      case "初始化数据库": return 4;
+      case "解析 Markdown": return 5;
+      case "加载信息层": return 6;
+      case "匹配页码": return 90;
+      case "写入数据库": return 94;
+      case "项目准备": return 99;
+      default: return 100;
+    }
+  }, []);
+
+  const startImportProgressHeartbeat = useCallback(() => {
+    clearImportProgressTimer();
+    importProgressTimer.current = window.setInterval(() => {
+      setImportProgress((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        // 匹配页码阶段由后端驱动进度，心跳不介入
+        if (prev.stage === "匹配页码") {
+          return prev;
+        }
+        const maxPercent = stageMaxPercent(prev.stage);
+        if (prev.percent >= maxPercent) {
+          return prev;
+        }
+        // 窄阶段 (max-min <= 3) 用 1% 增量
+        const narrowStages = new Set(["解压 ZIP", "初始化数据库", "解析 Markdown", "加载信息层"]);
+        const delta = narrowStages.has(prev.stage) ? 1 : 3;
+        return {
+          ...prev,
+          percent: Math.min(prev.percent + delta, maxPercent),
+        };
+      });
+    }, 300);
+  }, [clearImportProgressTimer, stageMaxPercent]);
+
+  const stopImportProgressHeartbeat = useCallback(() => {
+    clearImportProgressTimer();
+  }, [clearImportProgressTimer]);
+
   const loadProject = useCallback(async (path: string, name?: string) => {
     try {
       const msg = await invoke<string>("open_project", { path });
@@ -267,6 +319,8 @@ function App() {
   // 导入文档 = 新建项目
   // =========================================================================
   const handleImportNewProject = useCallback(async () => {
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenLog: (() => void) | null = null;
     try {
       setStatusMsg("正在打开文件选择器...");
       const selected = await open({
@@ -282,18 +336,29 @@ function App() {
 
       const zipPath = typeof selected === "string" ? selected : String(selected);
       setStatusMsg(`正在导入: ${zipPath} ...`);
-      setImportProgress({ stage: "准备中", percent: 0, detail: "正在初始化..." });
+      setImportProgress({ stage: "解压 ZIP", percent: 1, detail: "读取压缩包..." });
       setImportLogs([]);
+      startImportProgressHeartbeat();
 
-      // 短暂延迟，让 React 先渲染初始进度条，再注册监听和调用导入
-      await new Promise(r => setTimeout(r, 30));
-
-      const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
-        setImportProgress(e.payload);
+      unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
+        setImportProgress((prev) => {
+          const next = e.payload;
+          if (!prev) return next;
+          const prevIdx = importStages.indexOf(prev.stage);
+          const nextIdx = importStages.indexOf(next.stage);
+          if (nextIdx >= 0 && prevIdx >= 0 && nextIdx < prevIdx) {
+            return prev;
+          }
+          const percent = Math.max(prev.percent, next.percent);
+          return { stage: next.stage, percent, detail: next.detail };
+        });
       });
-      const unlistenLog = await listen<string>("import-log", (e) => {
+      unlistenLog = await listen<string>("import-log", (e) => {
         setImportLogs(prev => [...prev.slice(-19), e.payload]);
       });
+
+      // 短暂延迟，让 React 渲染进度条和事件监听器完成
+      await new Promise(r => setTimeout(r, 30));
 
       const msg = await invoke<string>("import_new_project", {
         zipPath: zipPath,
@@ -301,9 +366,8 @@ function App() {
 
       // 保持进度条至少显示 600ms（防止一闪而过）
       await new Promise(r => setTimeout(r, 600));
-      unlistenProgress();
-      unlistenLog();
       setImportProgress(null);
+      setStatusMsg(msg);
 
       const parts = msg.split(" | ");
       const name = parts[0] || "";
@@ -312,7 +376,6 @@ function App() {
       setProjectName(name);
       setProjectPath(pathPart.trim());
       setProjectKey(k => k + 1);
-      setStatusMsg(msg);
       addRecent(name, pathPart.trim());
 
       const toc = await invoke<TocNode[]>("get_toc");
@@ -320,10 +383,12 @@ function App() {
     } catch (err) {
       setStatusMsg(`导入失败: ${err}`);
       setImportProgress(null);
-      setImportLogs([]);
-      setImportLogs([]);
+    } finally {
+      stopImportProgressHeartbeat();
+      unlistenProgress?.();
+      unlistenLog?.();
     }
-  }, []);
+  }, [startImportProgressHeartbeat, stopImportProgressHeartbeat]);
 
   // =========================================================================
   // 打开已有项目（原生文件夹选择）
@@ -360,6 +425,8 @@ function App() {
   // 导入 MinerU 输出 zip
   // =========================================================================
   const handleImportDocument = useCallback(async () => {
+    let unlistenProgress: (() => void) | null = null;
+    let unlistenLog: (() => void) | null = null;
     try {
       const selected = await open({
         filters: [{ name: "ZIP 压缩包", extensions: ["zip"] }],
@@ -370,27 +437,35 @@ function App() {
       if (!selected) return;
 
       setStatusMsg("正在导入...");
-      setImportProgress({ stage: "准备中", percent: 0, detail: "正在初始化..." });
+      setImportProgress({ stage: "解压 ZIP", percent: 1, detail: "读取压缩包..." });
       setImportLogs([]);
+      startImportProgressHeartbeat();
 
-      await new Promise(r => setTimeout(r, 30));
-
-      const unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
-        setImportProgress(e.payload);
+      unlistenProgress = await listen<ImportProgress>("import-progress", (e) => {
+        setImportProgress((prev) => {
+          const next = e.payload;
+          if (!prev) return next;
+          const prevIdx = importStages.indexOf(prev.stage);
+          const nextIdx = importStages.indexOf(next.stage);
+          if (nextIdx >= 0 && prevIdx >= 0 && nextIdx < prevIdx) {
+            return prev;
+          }
+          const percent = Math.max(prev.percent, next.percent);
+          return { stage: next.stage, percent, detail: next.detail };
+        });
       });
-      const unlistenLog = await listen<string>("import-log", (e) => {
+      unlistenLog = await listen<string>("import-log", (e) => {
         setImportLogs(prev => [...prev.slice(-19), e.payload]);
       });
+
+      await new Promise(r => setTimeout(r, 30));
 
       const msg = await invoke<string>("import_document", {
         zipPath: selected as string,
       });
 
       await new Promise(r => setTimeout(r, 600));
-      unlistenProgress();
-      unlistenLog();
       setImportProgress(null);
-
       setStatusMsg(msg);
 
       const toc = await invoke<TocNode[]>("get_toc");
@@ -398,8 +473,12 @@ function App() {
     } catch (err) {
       setStatusMsg(`导入失败: ${err}`);
       setImportProgress(null);
+    } finally {
+      stopImportProgressHeartbeat();
+      unlistenProgress?.();
+      unlistenLog?.();
     }
-  }, []);
+  }, [startImportProgressHeartbeat, stopImportProgressHeartbeat]);
 
   // PDF 翻页：缓冲区策略 — 中间5页直接用，超出则重载21页
   const handlePageChange = useCallback(async (page: number) => {
@@ -655,7 +734,7 @@ function App() {
           <div className="workspace-right" style={{ width: rightW }}>
             <div className="pr-section">
               <h3>⚙️ 流程管线</h3>
-              <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} />
+              <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
             </div>
             <div className="pr-section pr-console">
               <h3>💬 智能对话</h3>
@@ -682,6 +761,24 @@ function App() {
               <div className="import-progress-bar" style={{ width: `${importProgress.percent}%` }} />
             </div>
             <div className="import-progress-detail">{importProgress.detail}</div>
+            <div className="import-stage-steps">
+              {importStages.map((label, idx) => {
+                const currentIndex = importProgress ? importStages.indexOf(importProgress.stage) : -1;
+                const state = currentIndex === -1
+                  ? "pending"
+                  : idx < currentIndex
+                    ? "done"
+                    : idx === currentIndex
+                      ? "active"
+                      : "pending";
+                return (
+                  <div key={label} className={`import-stage-step ${state}`}>
+                    <span className="step-dot" />
+                    <span>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
             <div className="import-progress-pct">{importProgress.percent}%</div>
             {importLogs.length > 0 && (
               <div className="import-logs">
