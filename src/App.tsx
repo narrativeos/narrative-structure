@@ -539,7 +539,7 @@ function App() {
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <div className="md-preview-panel">
-                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} />
+                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
                 </div>
               </div>
             </div>

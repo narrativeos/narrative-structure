@@ -8,9 +8,11 @@ import "./MarkdownPreview.css";
 interface Props {
   blocks: Block[] | null;
   activeBlock: Block | null;
+  projectPath?: string | null;
+  projectName?: string;
 }
 
-export default function MarkdownPreview({ blocks, activeBlock }: Props) {
+export default function MarkdownPreview({ blocks, activeBlock, projectPath, projectName }: Props) {
   const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
 
   const mdText = useMemo(() => {
@@ -20,6 +22,11 @@ export default function MarkdownPreview({ blocks, activeBlock }: Props) {
     }
     return "";
   }, [blocks, activeBlock]);
+
+  const assetBase = useMemo(() => {
+    if (!projectPath || !projectName) return "";
+    return `narrativestructure://localhost/${encodeURIComponent(projectPath)}/assets/${encodeURIComponent(projectName)}/`;
+  }, [projectPath, projectName]);
 
   if (!mdText) {
     return (
@@ -49,7 +56,21 @@ export default function MarkdownPreview({ blocks, activeBlock }: Props) {
       <div className="mdp-body">
         {viewMode === "preview" ? (
           <div className="markdown-body">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              rehypePlugins={[rehypeRaw]}
+              components={{
+                img: ({ src, alt, ...props }) => {
+                  let resolved = src || "";
+                  if (resolved && !resolved.startsWith("http") && !resolved.startsWith("data:") && !resolved.startsWith("narrativestructure:")) {
+                    // 相对路径 → narrativestructure:// 协议
+                    const clean = resolved.replace(/^\.?\/?/, "");
+                    resolved = assetBase + clean + "?raw=1";
+                  }
+                  return <img src={resolved} alt={alt || ""} {...props} />;
+                },
+              }}
+            >
               {mdText}
             </ReactMarkdown>
           </div>
