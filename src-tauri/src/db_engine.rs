@@ -342,6 +342,35 @@ pub fn get_blocks_by_page(
     Ok(blocks)
 }
 
+/// 统计每个页码的 block 数量
+#[tauri::command]
+pub fn get_page_stats(
+    state: tauri::State<'_, ProjectState>,
+) -> Result<Vec<(i32, i32)>, String> {
+    let conn_guard = get_conn(&state)?;
+    let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT CAST(json_extract(metadata, '$.page') AS INTEGER) as page, COUNT(*) as cnt
+             FROM blocks
+             WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) > 0
+             GROUP BY page
+             ORDER BY page",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let stats: Vec<(i32, i32)> = stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(stats)
+}
+
 /// 获取所有块（按 order_idx 排序，分页）
 #[tauri::command]
 pub fn get_blocks_paginated(

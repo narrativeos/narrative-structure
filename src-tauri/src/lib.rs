@@ -48,7 +48,7 @@ body{{margin:0;background:#525659}}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-let pdfDoc=null,currentPage=1,autoScrolling=false,lastWidth=0,renderTimer=null;
+let pdfDoc=null,currentPage=0,autoScrolling=false,lastWidth=0,renderTimer=null;
 let middleData=null,overlayVisible=true,colorMap={{
   title:'transparent',text:'transparent',
   interline_equation:'transparent',table:'transparent',
@@ -59,6 +59,18 @@ let borderMap={{
   table:'#f59e0b',image:'#8b5cf6'
 }};
 let highlightedTexts=null;
+
+// 三字符组 Jaccard 相似度 (0~1)
+function trigramSim(a,b){{
+if(a===b)return 1;
+var sa=new Set(),sb=new Set(),i;
+for(i=0;i+3<=a.length;i++)sa.add(a.substring(i,i+3));
+for(i=0;i+3<=b.length;i++)sb.add(b.substring(i,i+3));
+if(sa.size===0||sb.size===0)return 0;
+var inter=0;
+sa.forEach(function(v){{if(sb.has(v))inter++;}});
+return inter/(sa.size+sb.size-inter);
+}}
 
 function toggleOverlay(){{
   overlayVisible=!overlayVisible;
@@ -243,22 +255,38 @@ var pd=middleData[e.data.page-1];
 if(!pd||!pd.page_size)return;
 var pr=pgEl.getBoundingClientRect();
 var pw=pd.page_size[0],ph=pd.page_size[1];
-var results=[],bi,li,si,ti,b,sc,tc;
+// 收集页内所有 span: {{text, bbox, idx}}
+var allSpans=[],bi,li,si;
 for(bi=0;bi<(pd.para_blocks||[]).length;bi++){{
 var pb=pd.para_blocks[bi];
 for(li=0;li<(pb.lines||[]).length;li++){{
 var l=pb.lines[li];
 for(si=0;si<(l.spans||[]).length;si++){{
-var s=l.spans[si];sc=(s.content||'').replace(/\\s+/g,'');
-for(ti=0;ti<(e.data.texts||[]).length;ti++){{
-tc=e.data.texts[ti].replace(/\\s+/g,'');
-if(sc&&tc&&sc.length>2&&tc.length>2&&(sc.indexOf(tc)>=0||tc.indexOf(sc)>=0)){{
-b=s.bbox||[0,0,0,0];
+var sp=l.spans[si];
+allSpans.push({{t:(sp.content||'').replace(/\\s+/g,''),b:sp.bbox||[0,0,0,0]}});
+}}
+}}
+}}
+// 最大相似度匹配: 对每个 target text，找页内相似度最高的 span
+var results=[];
+var texts=e.data.texts||[];
+var used=Array(allSpans.length).fill(false);
+for(var ti=0;ti<texts.length;ti++){{
+var tc=texts[ti].replace(/\\s+/g,'');
+if(tc.length<3)continue;
+var bestScore=0.25,bestIdx=-1;
+for(var ai=0;ai<allSpans.length;ai++){{
+if(used[ai])continue;
+var sc=allSpans[ai].t;
+if(sc.length<3)continue;
+// 三字符组 Jaccard 相似度
+var score=trigramSim(tc,sc);
+if(score>bestScore){{bestScore=score;bestIdx=ai;}}
+}}
+if(bestIdx>=0){{
+used[bestIdx]=true;
+var b=allSpans[bestIdx].b;
 results.push({{x:b[0]/pw*pr.width+pr.left,y:b[1]/ph*pr.height+pr.top,w:(b[2]-b[0])/pw*pr.width,h:(b[3]-b[1])/ph*pr.height}});
-break;
-}}
-}}
-}}
 }}
 }}
 window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.left,top:pr.top,width:pr.width,height:pr.height}},ifrScrollY:window.scrollY,ifrInnerH:window.innerHeight,bboxes:results}},'*');
@@ -317,6 +345,7 @@ pub fn run() {
             db_engine::get_block,
             db_engine::get_block_chunk,
             db_engine::get_blocks_by_page,
+            db_engine::get_page_stats,
             db_engine::update_block,
             db_engine::search_blocks,
             db_engine::get_child_count,

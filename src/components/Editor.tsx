@@ -67,16 +67,25 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
 
   // 页面模式：按页码分组显示
   if (pageBlocks && pageBlocks.length > 0 && !block) {
-    // 按 page 分组
-    const groups: { page: number; blocks: Block[] }[] = [];
-    for (const b of pageBlocks) {
+    // 提取页码并排序
+    const withPage = pageBlocks.map(b => {
       let p = 0;
       try { p = JSON.parse(b.metadata || "{}").page || 0; } catch {}
+      return { block: b, page: p };
+    }).filter(wp => wp.page > 0).sort((a, b) => a.page - b.page || a.block.order_idx - b.block.order_idx);
+    // 按 page 分组
+    const groups: { page: number; blocks: Block[]; empty: boolean }[] = [];
+    for (const { block, page } of withPage) {
       const last = groups[groups.length - 1];
-      if (last && last.page === p) {
-        last.blocks.push(b);
+      if (last && last.page === page) {
+        last.blocks.push(block);
       } else {
-        groups.push({ page: p, blocks: [b] });
+        groups.push({ page, blocks: [block], empty: false });
+      }
+    }
+    for (const group of groups) {
+      if (group.blocks.every((b) => b.block_type === 'empty')) {
+        group.empty = true;
       }
     }
 
@@ -84,11 +93,21 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
       <div className="block-editor page-mode">
         <div className="editor-header">
           <span className="be-block-type">📄 页面内容</span>
-          <span className="editor-header-count">{pageBlocks.length} 行 · {groups.length} 页</span>
+          <span className="editor-header-pages">
+            {groups.map((g) => (
+              <button key={g.page} className={`page-btn${currentPage === g.page ? ' active' : ''}${g.empty ? ' page-btn-empty' : ''}`}
+                onClick={() => {
+                  const el = document.querySelector(`.page-group[data-page="${g.page}"]`);
+                  el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                }}
+              >{g.page}</button>
+            ))}
+          </span>
+          <span className="editor-header-count">{pageBlocks.length} 行</span>
         </div>
         <div className="page-blocks-list">
           {groups.map((g, gi) => (
-            <div key={gi} className={`page-group${currentPage === g.page ? ' page-group-active' : ''}`}>
+            <div key={gi} className={`page-group${g.empty ? ' page-group-empty' : ''}${currentPage === g.page ? ' page-group-active' : ''}`} data-page={g.page}>
               <div className="page-group-header">— p{g.page} —</div>
               {g.blocks.map((b) => {
                 const isLong = b.content && b.content.length > 60;

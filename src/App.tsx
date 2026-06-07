@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -88,9 +88,13 @@ function App() {
   const pageTextsRef = useRef<string[]>([]);
   const scrollBboxTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const drawLinesRef = useRef<() => void>();
+  const requestBboxRef = useRef<() => void>();
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
   const pageReqIdRef = useRef(0);
+  const loadedCenterRef = useRef(0); // 已加载数据的中心页码
+  const pageBlocksRef = useRef<Block[] | null>(null);
+  const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
   const [pageInput, setPageInput] = useState("");
 
   // 区块标注开关 → 同步 iframe 信息层
@@ -101,23 +105,7 @@ function App() {
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
     setMirrorBboxes([]); setLines([]); setPageRect(null);
-    if (!pageBlocks?.length) return;
-    const iframe = pdfIframeRef.current?.contentWindow;
-    if (!iframe) return;
-    const page = currentPageRef.current;
-    const pageTexts = pageBlocks
-      .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
-      .filter(b => b.block_type !== 'empty' && b.content.trim())
-      .map(b => b.content);
-    pageTextsRef.current = pageTexts;
-    if (!pageTexts.length) return;
-    const reqId = ++bboxRequestIdRef.current;
-    const timer = setTimeout(() => {
-      (window as any).__flyRows = pageBlocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
-      (window as any).__flyReqId = reqId;
-      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
-    }, 100);
-    return () => clearTimeout(timer);
+    requestBboxRef.current?.();
   }, [pageBlocks]);
 
   // 接收 bbox-pos → mirror 层 + 飞线；接收 scroll-offset → mirror 滚动
@@ -150,6 +138,25 @@ function App() {
       setLines(newLines);
     };
     drawLinesRef.current = drawAllLines;
+    // 提取当前页文本 → 请求 bbox
+    const requestBboxForCurrentPage = () => {
+      const blocks = pageBlocksRef.current;
+      if (!blocks?.length) return;
+      const iframe = pdfIframeRef.current?.contentWindow;
+      if (!iframe) return;
+      const page = currentPageRef.current;
+      const pageTexts = blocks
+        .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
+        .filter(b => b.block_type !== 'empty' && b.content.trim())
+        .map(b => b.content);
+      pageTextsRef.current = pageTexts;
+      if (!pageTexts.length) return;
+      const reqId = ++bboxRequestIdRef.current;
+      (window as any).__flyRows = blocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
+      (window as any).__flyReqId = reqId;
+      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
+    };
+    requestBboxRef.current = requestBboxForCurrentPage;
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
@@ -189,6 +196,42 @@ function App() {
     return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
   }, []);
 
+  const createEmptyPagePlaceholder = useCallback((page: number): Block => ({
+    id: `empty-page-${page}`,
+    parent_id: null,
+    order_idx: 0,
+    level: 0,
+    block_type: "empty",
+    content: "",
+    original_content: "",
+    metadata: JSON.stringify({ page }),
+    version: 1,
+    created_at: "",
+    updated_at: "",
+  }), []);
+
+  const fillPageWindow = useCallback((blocks: Block[], pageStart: number, pageEnd: number) => {
+    const pageMap = new Map<number, Block[]>();
+    for (const b of blocks) {
+      let p = 0;
+      try { p = JSON.parse(b.metadata || "{}").page || 0; } catch {}
+      if (p <= 0 || p < pageStart || p > pageEnd) continue;
+      if (!pageMap.has(p)) pageMap.set(p, []);
+      pageMap.get(p)!.push(b);
+    }
+    const filled: Block[] = [];
+    for (let p = pageStart; p <= pageEnd; p++) {
+      const group = pageMap.get(p);
+      if (group && group.length > 0) {
+        group.sort((a, b) => a.order_idx - b.order_idx);
+        filled.push(...group);
+      } else {
+        filled.push(createEmptyPagePlaceholder(p));
+      }
+    }
+    return filled;
+  }, [createEmptyPagePlaceholder]);
+
   // 可拖拽面板尺寸
   const [leftW, bindLeft] = useResizable(240, 160, 500);
   const [rightW, bindRight] = useResizable(220, 160, 400);
@@ -209,6 +252,12 @@ function App() {
       addRecent(pName, path);
       const toc = await invoke<TocNode[]>("get_toc");
       setTocTree(toc);
+      // 页码统计
+      const stats = await invoke<[number, number][]>("get_page_stats");
+      setImportLogs(prev => [...prev, `📊 页码分布: ${stats.length} 个不同页码，共 ${stats.reduce((s,[,c]) => s+c, 0)} 行`,
+        ...stats.map(([p, c]) => `  p${p}: ${c} 行`).slice(0, 30),
+        stats.length > 30 ? `  ... 共 ${stats.length} 页` : ""
+      ].filter(Boolean));
     } catch (err) {
       setStatusMsg(`错误: ${err}`);
     }
@@ -352,39 +401,61 @@ function App() {
     }
   }, []);
 
-  // PDF 翻页 → 加载当前页 ±5 页（共11页），UI 显示 ±2 页（共5页）
+  // PDF 翻页：缓冲区策略 — 中间5页直接用，超出则重载21页
   const handlePageChange = useCallback(async (page: number) => {
-    // 避免重复加载同一页
-    if (page === currentPageRef.current) return;
+    const center = loadedCenterRef.current;
+    // 缓冲区命中：当前页在已加载数据的中间5页内 → 只更新引用 + 滚动定位 + 刷新 bbox
+    if (center > 0 && pageBlocksRef.current && page >= center - 2 && page <= center + 2) {
+      currentPageRef.current = page;
+      setDisplayPage(page);
+      setMirrorBboxes([]); setLines([]); setPageRect(null);
+      requestBboxRef.current?.();
+      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 命中缓冲区 (center=p${center})`]);
+      requestAnimationFrame(() => {
+        document.querySelector('.page-group-active')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      });
+      return;
+    }
+    // 缓冲区未命中或无数据 → 重新加载
     const reqId = ++pageReqIdRef.current;
     try {
-      const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart: Math.max(1, page - 5), pageEnd: page + 5 });
+      const pageStart = Math.max(1, page - 10);
+      const pageEnd = pageStart + 20; // 始终 21 页窗口
+      const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart, pageEnd });
       if (reqId !== pageReqIdRef.current) return;
-      currentPageRef.current = page;
-      if (blocks.length > 0) {
-        setPageBlocks(blocks);
-        setActiveBlock(null);
+      const loadedPages = new Set<number>();
+      for (const b of blocks) {
+        try {
+          const p = JSON.parse(b.metadata || "{}").page || 0;
+          if (p > 0) loadedPages.add(p);
+        } catch {}
       }
+      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}，实际 ${loadedPages.size} 页/${blocks.length} 行`]);
+      const filledBlocks = fillPageWindow(blocks, pageStart, pageEnd);
+      loadedCenterRef.current = page;
+      currentPageRef.current = page;
+      setDisplayPage(page);
+      pageBlocksRef.current = filledBlocks;
+      setPageBlocks(filledBlocks);
+      setActiveBlock(null);
     } catch {
       if (reqId !== pageReqIdRef.current) return;
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
         if (reqId !== pageReqIdRef.current) return;
+        loadedCenterRef.current = page;
         currentPageRef.current = page;
-        if (blocks.length > 0) setPageBlocks(blocks);
+        setDisplayPage(page);
+        if (blocks.length > 0) {
+          pageBlocksRef.current = blocks;
+          setPageBlocks(blocks);
+        }
       } catch {}
     }
-  }, []);
+  }, [fillPageWindow]);
 
-  // UI 可见页：当前页 ±2（共5页），其余为预加载数据
-  const visibleBlocks = useMemo(() => {
-    if (!pageBlocks) return null;
-    const cp = currentPageRef.current;
-    return pageBlocks.filter(b => {
-      try { const p = JSON.parse(b.metadata || "{}").page || 0; return p >= cp - 2 && p <= cp + 2; }
-      catch { return true; }
-    });
-  }, [pageBlocks]);
+  // BlockEditor 和 MarkdownPreview 直接使用 pageBlocks（完整窗口）
+  // 缓冲区命中逻辑（中间5页）仅在 handlePageChange 中用于判断是否重载
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
       const blocks = await invoke<Block[]>("get_block_chunk", { id: nodeId });
@@ -527,7 +598,6 @@ function App() {
                 const p = parseInt(pageInput, 10);
                 if (p > 0) {
                   pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: p }, "*");
-                  handlePageChange(p);
                 }
               }
             }}
@@ -559,7 +629,7 @@ function App() {
                 <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <BlockEditor block={activeBlock} pageBlocks={visibleBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
+                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
                   onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
                   onHoverBlock={(b) => {
                     const iframe = pdfIframeRef.current?.contentWindow;
@@ -573,7 +643,7 @@ function App() {
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <div className="md-preview-panel">
-                  <MarkdownPreview blocks={visibleBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
+                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
                 </div>
               </div>
             </div>
