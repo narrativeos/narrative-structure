@@ -30,6 +30,7 @@ body{{margin:0;background:#525659}}
 .page-wrap{{position:relative;display:block;margin:0 auto 4px auto;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
 .page-wrap canvas{{display:block;max-width:100%;height:auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
+.page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
 .leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
 </style></head><body>
@@ -184,6 +185,11 @@ ov.className='overlay';
 ov.width=viewport.width;ov.height=viewport.height;
 wrap.appendChild(ov);
 drawOverlay(ov,num,scale);
+// 物理页码角标
+var badge=document.createElement('div');
+badge.className='page-num';
+badge.textContent='p'+num;
+wrap.appendChild(badge);
 viewer.appendChild(wrap);
 }});
 }})(i);
