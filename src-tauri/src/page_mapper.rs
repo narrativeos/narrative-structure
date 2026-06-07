@@ -501,7 +501,7 @@ fn match_lines_to_pages(
             .or_insert(span.bbox[3]);
     }
 
-    let max_skip: usize = 80;
+    let max_skip: usize = 120;
     let log_interval = (n / 20).max(200);
     let progress_update_interval = (n / 80).max(50);
     let progress_stage = "匹配页码";
@@ -569,8 +569,11 @@ fn match_lines_to_pages(
             };
             let page_penalty = if candidate_page < last_page {
                 0.55
+            } else if candidate_page == last_page {
+                1.08 // 同页加分，降低误跳到下一页的概率
             } else {
-                1.0 - (page_gap as f64 * 0.08).min(0.35)
+                // 向前跳页惩罚：单页跳 0.78，两页跳 0.56，三页及以上最低 0.45
+                1.0 - (page_gap as f64 * 0.22).min(0.55)
             };
 
             let span_distance = (pos.saturating_sub(span_cursor)) as f64;
@@ -584,7 +587,7 @@ fn match_lines_to_pages(
                 if candidate_top >= last_top {
                     y_penalty += ((candidate_top - last_top) / page_height).min(0.15);
                 } else {
-                    y_penalty *= 0.65;
+                    y_penalty *= 0.78; // 同页逆序惩罚放宽，避免多栏/复杂排版误丢弃
                 }
             } else if candidate_page == last_page + 1 {
                 if candidate_top > page_height * 0.3 {
@@ -593,7 +596,7 @@ fn match_lines_to_pages(
                     y_penalty += 0.05;
                 }
             } else if candidate_page > last_page + 1 {
-                y_penalty *= 0.75;
+                y_penalty *= 0.70; // 跨多页惩罚加强
             }
 
             let adjusted_score = score * page_penalty * position_penalty * y_penalty;
@@ -605,9 +608,38 @@ fn match_lines_to_pages(
         }
 
         if let Some(page_idx) = best_page {
-            pages[i] = Some(page_idx + 1);
+            let new_page = page_idx + 1;
+            // 跳页弱匹配保护：分数太低的不触发跳页，交给 pass2 插值
+            let page_jump = new_page != last_page;
+            let min_jump_score = if (new_page as i64 - last_page as i64).abs() > 1 {
+                0.50 // 跨多页跳至少 0.50
+            } else {
+                0.45 // 单页跳至少 0.45
+            };
+            if page_jump && best_score < min_jump_score {
+                eprintln!(
+                    "[page-map] p{} → p{} REJECTED @行{}: \"{}\" (score={:.3} < {:.2})",
+                    last_page, new_page, i,
+                    &md_lines[i].chars().take(80).collect::<String>(),
+                    best_score, min_jump_score
+                );
+                // 拒绝跳页，当作未匹配处理
+                if span_cursor < spans.len() {
+                    span_cursor += 1;
+                }
+                continue;
+            }
+            if page_jump {
+                eprintln!(
+                    "[page-map] p{} → p{} @行{}: \"{}\" (score={:.3})",
+                    last_page, new_page, i,
+                    &md_lines[i].chars().take(80).collect::<String>(),
+                    best_score
+                );
+            }
+            pages[i] = Some(new_page);
             span_cursor = best_pos + 1;
-            last_page = page_idx + 1;
+            last_page = new_page;
             last_top = spans[best_pos].bbox[1];
         } else if span_cursor < spans.len() {
             span_cursor += 1;
