@@ -113,6 +113,32 @@ html, body, #root {
 .btn-toggle.active { background: rgba(59,130,246,0.2); color: var(--color-accent); border-color: rgba(59,130,246,0.4); }
 .btn-toggle:disabled { opacity: 0.3; cursor: not-allowed; }
 
+.page-jump-input {
+  width: 52px;
+  padding: 2px 4px;
+  background: rgba(255,255,255,0.06);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+  outline: none;
+}
+.page-jump-input:focus {
+  border-color: var(--color-accent);
+  background: rgba(255,255,255,0.1);
+}
+.page-jump-input::placeholder {
+  color: var(--color-text-dim);
+  font-size: 10px;
+}
+/* 隐藏 number input 的 spinner */
+.page-jump-input::-webkit-inner-spin-button,
+.page-jump-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .status-msg {
   font-size: 11px;
   color: var(--color-text-dim);

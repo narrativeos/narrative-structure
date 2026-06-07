@@ -91,6 +91,7 @@ function App() {
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
   const pageReqIdRef = useRef(0);
+  const [pageInput, setPageInput] = useState("");
 
   // 区块标注开关 → 同步 iframe 信息层
   useEffect(() => {
@@ -115,7 +116,7 @@ function App() {
       (window as any).__flyRows = pageBlocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
       (window as any).__flyReqId = reqId;
       iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
-    }, 200);
+    }, 100);
     return () => clearTimeout(timer);
   }, [pageBlocks]);
 
@@ -353,12 +354,13 @@ function App() {
 
   // PDF 翻页 → 加载当前页 ±5 页（共11页），UI 显示 ±2 页（共5页）
   const handlePageChange = useCallback(async (page: number) => {
-    currentPageRef.current = page;
-    setMirrorBboxes([]); setLines([]);
+    // 避免重复加载同一页
+    if (page === currentPageRef.current) return;
     const reqId = ++pageReqIdRef.current;
     try {
       const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart: Math.max(1, page - 5), pageEnd: page + 5 });
       if (reqId !== pageReqIdRef.current) return;
+      currentPageRef.current = page;
       if (blocks.length > 0) {
         setPageBlocks(blocks);
         setActiveBlock(null);
@@ -368,6 +370,7 @@ function App() {
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
         if (reqId !== pageReqIdRef.current) return;
+        currentPageRef.current = page;
         if (blocks.length > 0) setPageBlocks(blocks);
       } catch {}
     }
@@ -513,6 +516,22 @@ function App() {
         <div className="toolbar-actions">
           <button className={`btn-toggle${showAnnotations ? ' active' : ''}`} onClick={() => { setShowAnnotations(!showAnnotations); if (showAnnotations) setShowFlyLines(false); }} title="区块标注">🏷️</button>
           <button className={`btn-toggle${showFlyLines ? ' active' : ''}`} onClick={() => setShowFlyLines(!showFlyLines)} disabled={!showAnnotations} title="飞线连">🔗</button>
+          <input
+            className="page-jump-input"
+            type="number" min="1"
+            placeholder="页码"
+            value={pageInput}
+            onChange={(e) => setPageInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const p = parseInt(pageInput, 10);
+                if (p > 0) {
+                  pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: p }, "*");
+                  handlePageChange(p);
+                }
+              }
+            }}
+          />
           <button className="btn-import" onClick={handleImportDocument} title="追加导入">📥</button>
           <span className="status-msg">{statusMsg}</span>
         </div>
