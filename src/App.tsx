@@ -88,6 +88,13 @@ function App() {
   const pageTextsRef = useRef<string[]>([]);
   const scrollBboxTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const drawLinesRef = useRef<() => void>();
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const [showFlyLines, setShowFlyLines] = useState(true);
+
+  // 区块标注开关 → 同步 iframe 信息层
+  useEffect(() => {
+    pdfIframeRef.current?.contentWindow?.postMessage({ type: "set-overlay", visible: showAnnotations }, "*");
+  }, [showAnnotations]);
 
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
@@ -145,7 +152,7 @@ function App() {
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
-        // 滚动时也刷新 bbox 位置（debounce 300ms）
+        // 滚动时也刷新 bbox 位置（debounce 150ms）
         const iframeWin = pdfIframeRef.current?.contentWindow;
         const texts = pageTextsRef.current;
         if (iframeWin && texts.length) {
@@ -156,6 +163,11 @@ function App() {
             iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
           }, 150);
         }
+        return;
+      }
+      // iframe 内 👁 按钮 → 同步父窗口 🏷️ 状态
+      if (e.data?.type === 'overlay-toggled') {
+        setShowAnnotations(e.data.visible);
         return;
       }
       const reqId = (window as any).__flyReqId;
@@ -488,6 +500,8 @@ function App() {
           <button className="btn-close" onClick={handleCloseProject} title="关闭项目">✕</button>
         </div>
         <div className="toolbar-actions">
+          <button className={`btn-toggle${showAnnotations ? ' active' : ''}`} onClick={() => { setShowAnnotations(!showAnnotations); if (showAnnotations) setShowFlyLines(false); }} title="区块标注">🏷️</button>
+          <button className={`btn-toggle${showFlyLines ? ' active' : ''}`} onClick={() => setShowFlyLines(!showFlyLines)} disabled={!showAnnotations} title="飞线连">🔗</button>
           <button className="btn-import" onClick={handleImportDocument} title="追加导入">📥</button>
           <span className="status-msg">{statusMsg}</span>
         </div>
@@ -512,7 +526,7 @@ function App() {
           <div className="workspace-center">
             <div className="workbench-split" id="workbench-split">
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} />
+                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
               </div>
               <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
                 <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={currentPageRef.current}
@@ -549,8 +563,8 @@ function App() {
             </div>
           </div>
 
-          {/* 连线信息层（绝对定位，覆盖 workspace 全区域） */}
-          <LinesLayer lines={lines} />
+          {/* 连线信息层 */}
+          {showFlyLines && showAnnotations && <LinesLayer lines={lines} />}
         </Workspace>
       </div>
 

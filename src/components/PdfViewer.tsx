@@ -8,10 +8,11 @@ interface PdfViewerProps {
   onPageChange?: (page: number) => void;
   mirrorBboxes?: MirrorBbox[];
   pageRect?: { left: number; top: number; width: number; height: number } | null;
+  showAnnotations?: boolean;
 }
 
 const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
-  function PdfViewer({ projectPath, onPageChange, mirrorBboxes, pageRect }, ref) {
+  function PdfViewer({ projectPath, onPageChange, mirrorBboxes, pageRect, showAnnotations }, ref) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -80,7 +81,7 @@ const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
     <div className="pdf-viewer">
       <div className="pdf-content">
         <iframe ref={setRef} src={pdfUrl} className="pdf-embed" title="PDF Preview" />
-        <PdfMirrorLayer bboxes={mirrorBboxes || []} pageRect={pageRect} />
+        {showAnnotations !== false && <PdfMirrorLayer bboxes={mirrorBboxes || []} pageRect={pageRect} />}
       </div>
     </div>
   );

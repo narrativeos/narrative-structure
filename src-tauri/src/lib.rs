@@ -66,6 +66,7 @@ function toggleOverlay(){{
   if(overlayVisible){{btn.classList.add('active');}}
   else{{btn.classList.remove('active');}}
   if(pdfDoc)renderAllPages(pdfDoc);
+  window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
 }}
 
 function drawOverlay(canvas,pageNum,viewportScale){{
@@ -227,6 +228,13 @@ reRenderOverlay();
 if(e.data&&e.data.type==='clear-highlight'){{
 highlightedTexts=null;
 reRenderOverlay();
+}}
+if(e.data&&e.data.type==='set-overlay'){{
+overlayVisible=!!e.data.visible;
+var btn=document.getElementById('btn-overlay');
+if(overlayVisible){{btn.classList.add('active');}}
+else{{btn.classList.remove('active');}}
+if(pdfDoc)renderAllPages(pdfDoc);
 }}
 if(e.data&&e.data.type==='get-bbox-pos'){{
 var pgEl=document.getElementById('page-'+e.data.page);
