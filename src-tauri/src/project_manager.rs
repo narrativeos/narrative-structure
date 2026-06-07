@@ -190,6 +190,31 @@ pub fn import_new_project(
     page_mapper::emit_log(&app_handle, &format!("[import] ZIP 包含 {} 个条目，开始解压...", total_entries));
     page_mapper::emit_progress(&app_handle, "解压 ZIP", 5, &format!("共 {} 个文件", total_entries));
 
+    // 先扫描所有条目，检测是否有公共前缀目录（如 GitHub zip 的 project-main/）
+    let mut common_prefix = String::new();
+    for i in 0..total_entries {
+        if let Ok(entry) = archive.by_index(i) {
+            let name = entry.name().to_string();
+            if !name.ends_with('/') && !name.starts_with('.') {
+                let first = name.split('/').next().unwrap_or("");
+                if common_prefix.is_empty() {
+                    common_prefix = first.to_string();
+                } else if common_prefix != first {
+                    common_prefix.clear();
+                    break;
+                }
+            }
+        }
+    }
+    if !common_prefix.is_empty() {
+        page_mapper::emit_log(&app_handle, &format!("[import] 检测到公共前缀目录: {}/", common_prefix));
+    }
+
+    let mut pdf_count = 0u32;
+    let mut img_count = 0u32;
+    let mut json_count = 0u32;
+    let mut other_count = 0u32;
+
     for i in 0..total_entries {
         let mut entry = archive.by_index(i)
             .map_err(|e| format!("读取 zip 条目失败: {}", e))?;
@@ -197,13 +222,15 @@ pub fn import_new_project(
         if entry_name.ends_with('/') {
             continue;
         }
-        let file_name = Path::new(&entry_name)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&entry_name);
-        let dest_path = assets_subdir.join(file_name);
 
-        // 避免覆盖已有子目录中的同名文件
+        // 去掉公共前缀，保留相对路径结构
+        let rel_path = if !common_prefix.is_empty() && entry_name.starts_with(&format!("{}/", common_prefix)) {
+            entry_name[common_prefix.len() + 1..].to_string()
+        } else {
+            entry_name.clone()
+        };
+
+        let dest_path = assets_subdir.join(&rel_path);
         if let Some(parent) = dest_path.parent() {
             fs::create_dir_all(parent).ok();
         }
@@ -214,12 +241,23 @@ pub fn import_new_project(
         fs::write(&dest_path, &buf)
             .map_err(|e| format!("写入文件失败: {}", e))?;
 
-        if file_name.ends_with(".md") && md_content.is_none() {
+        // 统计文件类型
+        let lower = rel_path.to_lowercase();
+        if lower.ends_with(".pdf") { pdf_count += 1; }
+        else if lower.ends_with(".png") || lower.ends_with(".jpg") || lower.ends_with(".jpeg") || lower.ends_with(".gif") || lower.ends_with(".svg") || lower.ends_with(".webp") { img_count += 1; }
+        else if lower.ends_with(".json") { json_count += 1; }
+        else { other_count += 1; }
+
+        // 捕获第一个 .md 作为正文
+        if lower.ends_with(".md") && md_content.is_none() {
             md_content = Some(String::from_utf8_lossy(&buf).to_string());
         }
     }
 
-    page_mapper::emit_log(&app_handle, &format!("[import] 解压完成 → {}", assets_subdir.display()));
+    page_mapper::emit_log(&app_handle, &format!(
+        "[import] 解压完成: PDF×{} 图片×{} JSON×{} 其他×{} → {}",
+        pdf_count, img_count, json_count, other_count, assets_subdir.display()
+    ));
 
     // 初始化 narrative.db
     page_mapper::emit_progress(&app_handle, "初始化数据库", 30, "创建表结构...");
