@@ -101,7 +101,7 @@
 
 .mdp-mode-btn.active {
   background: oklch(var(--primary));
-  color: #fff;
+  color: oklch(var(--primary-foreground));
 }
 
 .mdp-body {
@@ -131,8 +131,8 @@
   border: 1px solid oklch(var(--border));
 }
 .markdown-body pre {
-  background: #1b1e28;
-  color: #d6dae0;
+  background: oklch(var(--diff-panel));
+  color: oklch(var(--diff-text));
   padding: 14px 18px;
   border-radius: 8px;
   overflow-x: auto;

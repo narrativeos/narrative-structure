@@ -83,8 +83,8 @@
 }
 
 .ps-tl-item.done .ps-tl-dot {
-  background: #22c55e;
-  box-shadow: 0 0 0 3px oklch(0.6 0.2 140 / 0.15);
+  background: oklch(var(--log-success));
+  box-shadow: 0 0 0 3px oklch(var(--log-success) / 0.15);
 }
 
 .ps-tl-item.active .ps-tl-dot {

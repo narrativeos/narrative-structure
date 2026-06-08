@@ -42,7 +42,7 @@
   justify-content: center;
   gap: 6px;
   background: linear-gradient(135deg, oklch(0.6 0.18 250), oklch(0.52 0.22 250));
-  color: #fff;
+  color: oklch(var(--primary-foreground));
   border: none;
   border-radius: 7px;
   padding: 8px 0;

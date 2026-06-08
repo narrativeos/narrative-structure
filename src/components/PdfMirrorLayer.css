@@ -12,14 +12,14 @@
   position: absolute;
   pointer-events: auto;
   cursor: default;
-  border: 2px solid rgba(251,191,36,0.35);
-  background: rgba(251,191,36,0.06);
+  border: 2px solid oklch(0.75 0.16 90 / 0.35);
+  background: oklch(0.75 0.16 90 / 0.06);
 }
 
 .mirror-page-frame {
   position: absolute;
   pointer-events: none;
-  border: 2px solid rgba(98, 114, 164, 0.4);
-  background: rgba(98, 114, 164, 0.03);
+  border: 2px solid oklch(0.62 0.12 250 / 0.4);
+  background: oklch(0.62 0.12 250 / 0.03);
   border-radius: 2px;
 }

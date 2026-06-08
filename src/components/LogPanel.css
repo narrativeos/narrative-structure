@@ -43,9 +43,9 @@
 }
 
 .log-entry.info { color: oklch(var(--muted-foreground)); }
-.log-entry.error { color: #e06c75; }
-.log-entry.success { color: #73c991; }
-.log-entry.warn { color: #e5c07b; }
+.log-entry.error { color: oklch(var(--log-error)); }
+.log-entry.success { color: oklch(var(--log-success)); }
+.log-entry.warn { color: oklch(var(--log-warn)); }
 
 .log-time {
   color: oklch(var(--muted-foreground));
