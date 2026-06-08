@@ -249,20 +249,28 @@
 
   .topbar-theme-btn {
     @apply rounded-lg border;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-color: oklch(var(--border));
-    background: oklch(var(--surface-alt));
-    color: oklch(var(--muted-foreground));
-    transition: all 0.15s;
+    width: 30px !important;
+    height: 30px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-color: oklch(var(--border)) !important;
+    background: oklch(var(--surface-alt)) !important;
+    color: oklch(var(--muted-foreground)) !important;
+    transition: all 0.15s !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
   }
   .topbar-theme-btn:hover {
-    background: oklch(var(--surface-muted));
-    color: oklch(var(--foreground));
+    background: oklch(var(--surface-muted)) !important;
+    color: oklch(var(--foreground)) !important;
+  }
+  /* Ensure theme button icon is visible */
+  .topbar-theme-btn svg {
+    width: 16px !important;
+    height: 16px !important;
+    stroke-width: 2 !important;
   }
 
   /* ---- 按钮 ---- */
