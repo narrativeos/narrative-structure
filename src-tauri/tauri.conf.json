@@ -13,10 +13,10 @@
     "windows": [
       {
         "title": "NarrativeStructure — 文档智能化重构工作台",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 900,
-        "minHeight": 600
+        "width": 1920,
+        "height": 1080,
+        "minWidth": 1200,
+        "minHeight": 720
       }
     ],
     "security": {

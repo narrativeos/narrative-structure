@@ -1,41 +1,91 @@
 .agent-console-compact {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 0;
+  gap: 8px;
+  padding: 2px 0;
 }
 
 .ac-textarea {
-  background: rgba(255,255,255,0.06);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 6px 8px;
-  color: var(--color-text);
+  background: oklch(var(--background));
+  border: 1px solid oklch(var(--border));
+  border-radius: 8px;
+  padding: 9px 11px;
+  color: oklch(var(--foreground));
   font-size: 12px;
   font-family: inherit;
+  line-height: 1.55;
   outline: none;
   resize: vertical;
-  min-height: 50px;
+  min-height: 60px;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .ac-textarea:focus {
-  border-color: var(--color-accent);
+  border-color: oklch(var(--primary));
+  box-shadow: 0 0 0 2px oklch(var(--primary) / 0.15);
 }
 
 .ac-textarea::placeholder {
-  color: var(--color-text-dim);
+  color: oklch(var(--muted-foreground));
+  opacity: 0.45;
+}
+
+.ac-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .ac-btn {
-  background: var(--color-accent);
+  flex: 1;
+  background: linear-gradient(135deg, oklch(0.6 0.18 250), oklch(0.52 0.22 250));
   color: #fff;
   border: none;
-  border-radius: 4px;
-  padding: 4px 0;
+  border-radius: 7px;
+  padding: 7px 0;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11.5px;
+  font-weight: 650;
+  transition: all 0.15s;
+  letter-spacing: 0.01em;
+  box-shadow: 0 2px 8px oklch(0.55 0.2 250 / 0.2);
 }
 
 .ac-btn:hover {
-  background: var(--color-accent-hover);
+  transform: translateY(-0.5px);
+  box-shadow: 0 4px 14px oklch(0.55 0.2 250 / 0.3);
+}
+
+.ac-btn:active {
+  transform: translateY(0);
+}
+
+.ac-btn-secondary {
+  flex: 1;
+  background: transparent;
+  color: oklch(var(--muted-foreground));
+  border: 1px solid oklch(var(--border));
+  border-radius: 7px;
+  padding: 7px 0;
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 550;
+  transition: all 0.15s;
+}
+
+.ac-btn-secondary:hover {
+  background: oklch(var(--foreground) / 0.05);
+  color: oklch(var(--foreground));
+  border-color: oklch(var(--foreground) / 0.15);
+}
+
+.ac-response {
+  font-size: 12px;
+  line-height: 1.55;
+  color: oklch(var(--foreground));
+  padding: 10px;
+  background: oklch(var(--background));
+  border-radius: 8px;
+  border: 1px solid oklch(var(--border));
+  max-height: 180px;
+  overflow-y: auto;
 }

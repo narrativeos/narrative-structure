@@ -1,31 +1,50 @@
 .toc-tree {
-  font-size: 13px;
+  font-size: 12px;
   user-select: none;
 }
 
 .toc-item-row {
   display: flex;
   align-items: center;
-  padding: 3px 8px;
+  padding: 4px 10px 4px 6px;
+  margin: 1px 4px;
+  border-radius: 6px;
   cursor: pointer;
   border-left: 2px solid transparent;
-  transition: background 0.1s;
+  transition: background 0.12s, border-color 0.12s;
+  gap: 5px;
+  min-height: 28px;
 }
 
 .toc-item-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: oklch(var(--foreground) / 0.05);
+}
+
+.toc-item-row.active {
+  background: oklch(var(--primary) / 0.1);
+  border-left-color: oklch(var(--primary));
 }
 
 .toc-item-row:active {
-  background: rgba(0, 122, 204, 0.2);
+  background: oklch(var(--primary) / 0.16);
 }
 
 .toc-toggle {
-  width: 16px;
-  font-size: 10px;
-  color: var(--color-text-dim);
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  color: oklch(var(--muted-foreground));
   flex-shrink: 0;
-  transition: transform 0.15s;
+  border-radius: 4px;
+  transition: transform 0.15s, background 0.12s, color 0.12s;
+}
+
+.toc-toggle:hover {
+  background: oklch(var(--foreground) / 0.08);
+  color: oklch(var(--foreground));
 }
 
 .toc-toggle.expanded {
@@ -34,21 +53,44 @@
 
 .toc-toggle.placeholder {
   visibility: hidden;
+  pointer-events: none;
+}
+
+.toc-type-badge {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0.65;
+  background: oklch(var(--foreground) / 0.06);
+  color: oklch(var(--muted-foreground));
 }
 
 .toc-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: oklch(var(--foreground));
+  line-height: 1.45;
+  font-weight: 450;
+}
+
+.toc-item-row.active .toc-label {
+  font-weight: 550;
 }
 
 .toc-children {
-  /* nested */
+  border-left: 1px solid oklch(var(--border));
+  margin-left: 9px;
 }
 
 .toc-empty {
-  padding: 16px;
-  color: var(--color-text-dim);
+  padding: 32px 16px;
+  color: oklch(var(--muted-foreground));
   font-size: 12px;
   text-align: center;
+  opacity: 0.5;
 }

@@ -2,6 +2,13 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import {
+  Panel,
+  Group,
+  Separator,
+} from "react-resizable-panels";
+import { Sun, Moon } from "lucide-react";
+import { useTheme } from "./components/ThemeProvider";
 import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
 import type { MirrorBbox } from "./components/PdfMirrorLayer";
@@ -11,10 +18,7 @@ import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
 import LogPanel from "./components/LogPanel";
-import Workspace from "./components/Workspace";
 import LinesLayer, { LineDef } from "./components/LinesLayer";
-import { useResizable } from "./hooks/useResizable";
-import "./App.css";
 
 export interface TocNode {
   id: string;
@@ -67,6 +71,7 @@ function fmtTime(ts: number): string {
 }
 
 function App() {
+  const { theme, setTheme } = useTheme();
   const [projectPath, setProjectPath] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [tocTree, setTocTree] = useState<TocNode[]>([]);
@@ -233,12 +238,6 @@ function App() {
     }
     return filled;
   }, [createEmptyPagePlaceholder]);
-
-  // 可拖拽面板尺寸
-  const [leftW, bindLeft] = useResizable(240, 160, 500);
-  const [rightW, bindRight] = useResizable(220, 160, 400);
-
-  const [, bindBottom] = useResizable(140, 60, 400, "y");
 
   // =========================================================================
   // 加载项目
@@ -484,7 +483,7 @@ function App() {
   const handlePageChange = useCallback(async (page: number) => {
     const center = loadedCenterRef.current;
     // 缓冲区命中：当前页在已加载数据的中间5页内 → 只更新引用 + 滚动定位 + 刷新 bbox
-    if (center > 0 && pageBlocksRef.current && page >= center - 2 && page <= center + 2) {
+    if (center > 0 && pageBlocksRef.current && page >= center - 3 && page <= center + 3) {
       currentPageRef.current = page;
       setDisplayPage(page);
       setMirrorBboxes([]); setLines([]); setPageRect(null);
@@ -498,8 +497,8 @@ function App() {
     // 缓冲区未命中或无数据 → 重新加载
     const reqId = ++pageReqIdRef.current;
     try {
-      const pageStart = Math.max(1, page - 10);
-      const pageEnd = pageStart + 20; // 始终 21 页窗口
+      const pageStart = Math.max(1, page - 4);
+      const pageEnd = pageStart + 8; // 9 页窗口（当前 ±4）
       const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart, pageEnd });
       if (reqId !== pageReqIdRef.current) return;
       const loadedPages = new Set<number>();
@@ -509,7 +508,7 @@ function App() {
           if (p > 0) loadedPages.add(p);
         } catch {}
       }
-      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}，实际 ${loadedPages.size} 页/${blocks.length} 行`]);
+      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}（9页窗口），实际 ${loadedPages.size} 页/${blocks.length} 行`]);
       const filledBlocks = fillPageWindow(blocks, pageStart, pageEnd);
       loadedCenterRef.current = page;
       currentPageRef.current = page;
@@ -581,7 +580,9 @@ function App() {
     return (
       <div className="welcome-screen">
         <div className="welcome-card">
-          <div className="welcome-icon">🧱</div>
+          <div className="welcome-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          </div>
           <h1 className="welcome-title">NarrativeStructure</h1>
           <p className="welcome-subtitle">文档智能化重构工作台</p>
           <p className="welcome-desc">
@@ -590,12 +591,12 @@ function App() {
 
           <div className="welcome-actions">
             <button
-              className="btn btn-primary"
+              className="btn-primary"
               onClick={() => handleImportNewProject()}
             >
               📥 导入文档开始
             </button>
-            <button className="btn btn-secondary" onClick={handleOpenProject}>
+            <button className="btn-secondary" onClick={handleOpenProject}>
               📂 打开已有项目
             </button>
           </div>
@@ -627,13 +628,13 @@ function App() {
 
         {importProgress && (
           <div className="import-overlay">
-            <div className="import-progress-card">
-              <div className="import-progress-stage">{importProgress.stage}</div>
-              <div className="import-progress-bar-wrap">
-                <div className="import-progress-bar" style={{ width: `${importProgress.percent}%` }} />
+            <div className="import-card">
+              <div className="import-stage">{importProgress.stage}</div>
+              <div className="import-bar-wrap">
+                <div className="import-bar" style={{ width: `${importProgress.percent}%` }} />
               </div>
-              <div className="import-progress-detail">{importProgress.detail}</div>
-              <div className="import-progress-pct">{importProgress.percent}%</div>
+              <div className="import-detail">{importProgress.detail}</div>
+              <div className="import-pct">{importProgress.percent}%</div>
               {importLogs.length > 0 && (
                 <div className="import-logs">
                   {importLogs.map((log, i) => (
@@ -652,20 +653,20 @@ function App() {
   // 主界面
   // =========================================================================
   return (
-    <div className="app-grid" style={{
-      gridTemplateColumns: "1fr",
-      gridTemplateRows: "40px 1fr 4px 140px",
-      gridTemplateAreas: `"toolbar" "main" "hbot" "bottom"`,
-    }}>
-      <header className="toolbar">
-        <h1 className="app-title">NarrativeStructure</h1>
-        <div className="toolbar-project">
-          <span className="project-path" title={projectPath}>📁 {projectName}</span>
-          <button className="btn-close" onClick={handleCloseProject} title="关闭项目">✕</button>
+    <div className="app-shell">
+      {/* ======== 顶栏：固定高度，固定顶部 ======== */}
+      <header className="topbar">
+        <div className="topbar-left">
+          <h1 className="topbar-logo">NarrativeStructure</h1>
+          <div className="topbar-project">
+            <span className="topbar-project-path" title={projectPath}>📁 {projectName}</span>
+            <button className="btn-close" onClick={handleCloseProject} title="关闭项目">✕</button>
+          </div>
         </div>
-        <div className="toolbar-actions">
-          <button className={`btn-toggle${showAnnotations ? ' active' : ''}`} onClick={() => { setShowAnnotations(!showAnnotations); if (showAnnotations) setShowFlyLines(false); }} title="区块标注">🏷️</button>
-          <button className={`btn-toggle${showFlyLines ? ' active' : ''}`} onClick={() => setShowFlyLines(!showFlyLines)} disabled={!showAnnotations} title="飞线连">🔗</button>
+
+        <div className="topbar-actions">
+          <button className={`btn-sm${showAnnotations ? ' active' : ''}`} onClick={() => { setShowAnnotations(!showAnnotations); if (showAnnotations) setShowFlyLines(false); }} title="区块标注">🏷️ 标注</button>
+          <button className={`btn-sm${showFlyLines ? ' active' : ''}`} onClick={() => setShowFlyLines(!showFlyLines)} disabled={!showAnnotations} title="飞线连">🔗 飞线</button>
           <input
             className="page-jump-input"
             type="number" min="1"
@@ -681,86 +682,124 @@ function App() {
               }
             }}
           />
-          <button className="btn-import" onClick={handleImportDocument} title="追加导入">📥</button>
-          <span className="status-msg">{statusMsg}</span>
+            <button className="btn-sm" onClick={handleImportDocument} title="追加导入">📥 导入</button>
+        </div>
+        <div className="topbar-right">
+          <span className="topbar-status">{statusMsg}</span>
+          <button
+            className="btn-sm topbar-theme-btn"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+          >
+            {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
         </div>
       </header>
-
-      <div style={{ gridArea: "main", overflow: "hidden" }}>
-        <Workspace ref={workspaceRef}>
-          {/* 左侧：TOC + 文件资产 */}
-          <div className="workspace-left" style={{ width: leftW }}>
-            <div className="toc-section">
-              <h3>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</h3>
-              <TOC nodes={tocTree} onSelect={handleSelectBlock} />
-            </div>
-            <div className="files-section">
-              <FileExplorer projectPath={projectPath} />
-            </div>
-          </div>
-
-          <div className="workspace-resize-h" {...bindLeft()} />
-
-          {/* 中间三列：PDF | Block列表 | Markdown编辑器（等宽） */}
-          <div className="workspace-center">
-            <div className="workbench-split" id="workbench-split">
-              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
+      {/* ======== 主体区域：可拖拽面板布局 ======== */}
+      <Group orientation="vertical" style={{ flex: 1, overflow: "hidden" }}>
+        {/* 中间区域：左 + 中 + 右 */}
+        <Panel defaultSize="78%" minSize="50%">
+          <Group orientation="horizontal" style={{ overflow: "hidden" }}>
+            {/* 左栏：TOC + 文件资产，可调宽度 */}
+            <Panel defaultSize="18%" minSize={200} maxSize="30%" className="panel-left">
+              <div className="sidebar-panel">
+                <div className="sidebar-header">
+                  <span>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</span>
+                </div>
+                <div className="sidebar-content" style={{ flex: 3 }}>
+                  <TOC nodes={tocTree} onSelect={handleSelectBlock} />
+                </div>
+                <div className="sidebar-content" style={{ flex: 1, borderTop: "1px solid oklch(var(--border))" }}>
+                  <FileExplorer projectPath={projectPath} />
+                </div>
               </div>
-              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
-                  onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
-                  onHoverBlock={(b) => {
-                    const iframe = pdfIframeRef.current?.contentWindow;
-                    if (b && b.block_type !== 'empty' && b.content.trim()) {
-                      iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
-                    } else {
-                      iframe?.postMessage({ type: "clear-highlight" }, "*");
-                    }
-                  }}
-                />
+            </Panel>
+
+            <Separator className="resize-handle resize-handle-h" />
+
+            {/* 中栏工作区：PDF | Blocks列表 | Markdown */}
+            <Panel defaultSize="62%">
+              <div className="workspace-area" ref={workspaceRef} style={{ position: "relative" }}>
+                <div className="workspace-col">
+                  <div className="workspace-pane">
+                    <div className="workspace-pane-header">PDF 视图</div>
+                    <div className="workspace-pane-body">
+                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
+                    </div>
+                  </div>
+                </div>
+                <div className="workspace-col">
+                  <div className="workspace-pane">
+                    <div className="workspace-pane-header">内容编辑</div>
+                    <div className="workspace-pane-body">
+                      <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
+                        onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
+                        onHoverBlock={(b) => {
+                          const iframe = pdfIframeRef.current?.contentWindow;
+                          if (b && b.block_type !== 'empty' && b.content.trim()) {
+                            iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
+                          } else {
+                            iframe?.postMessage({ type: "clear-highlight" }, "*");
+                          }
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="workspace-col">
+                  <div className="workspace-pane">
+                    <div className="workspace-pane-header">Markdown 预览</div>
+                    <div className="workspace-pane-body">
+                      <div className="md-preview-panel">
+                        <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 连线信息层 */}
+                {showFlyLines && showAnnotations && <LinesLayer lines={lines} />}
               </div>
-              <div className="wb-col" style={{ flex: 1, minWidth: 0 }}>
-                <div className="md-preview-panel">
-                  <MarkdownPreview blocks={pageBlocks} activeBlock={activeBlock} projectPath={projectPath} projectName={projectName} />
+            </Panel>
+
+            {/* 右栏：流程管线 + 智能对话，固定宽度 */}
+            <div className="sidebar-panel sidebar-tools" style={{ width: 280 }}>
+              <div className="sidebar-section">
+                <div className="sidebar-header">⚙️ 流程管线</div>
+                <div className="sidebar-content">
+                  <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
+                </div>
+              </div>
+              <div className="sidebar-divider" />
+              <div className="sidebar-section">
+                <div className="sidebar-header">💬 智能对话</div>
+                <div className="sidebar-content">
+                  <AgentConsole />
                 </div>
               </div>
             </div>
+          </Group>
+        </Panel>
+
+        <Separator className="resize-handle resize-handle-v" />
+
+        {/* 底栏：处理日志，可调高度 */}
+        <Panel defaultSize="15%" minSize="6%" maxSize="35%" className="panel-bottom">
+          <div className="bottom-panel">
+            <LogPanel externalLogs={importLogs} />
           </div>
+        </Panel>
+      </Group>
 
-          <div className="workspace-resize-h" {...bindRight({ reversed: true })} />
-
-          {/* 右侧：Pipeline + Console */}
-          <div className="workspace-right" style={{ width: rightW }}>
-            <div className="pr-section">
-              <h3>⚙️ 流程管线</h3>
-              <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
-            </div>
-            <div className="pr-section pr-console">
-              <h3>💬 智能对话</h3>
-              <AgentConsole />
-            </div>
-          </div>
-
-          {/* 连线信息层 */}
-          {showFlyLines && showAnnotations && <LinesLayer lines={lines} />}
-        </Workspace>
-      </div>
-
-      <div className="resize-handle resize-v" style={{ gridArea: "hbot" }} {...bindBottom({ reversed: true })} />
-
-      <footer className="panel-bottom">
-        <LogPanel externalLogs={importLogs} />
-      </footer>
-
+      {/* ======== 导入进度遮罩 ======== */}
       {importProgress && (
         <div className="import-overlay">
-          <div className="import-progress-card">
-            <div className="import-progress-stage">{importProgress.stage}</div>
-            <div className="import-progress-bar-wrap">
-              <div className="import-progress-bar" style={{ width: `${importProgress.percent}%` }} />
+          <div className="import-card">
+            <div className="import-stage">{importProgress.stage}</div>
+            <div className="import-bar-wrap">
+              <div className="import-bar" style={{ width: `${importProgress.percent}%` }} />
             </div>
-            <div className="import-progress-detail">{importProgress.detail}</div>
+            <div className="import-detail">{importProgress.detail}</div>
             <div className="import-stage-steps">
               {importStages.map((label, idx) => {
                 const currentIndex = importProgress ? importStages.indexOf(importProgress.stage) : -1;
@@ -779,7 +818,7 @@ function App() {
                 );
               })}
             </div>
-            <div className="import-progress-pct">{importProgress.percent}%</div>
+            <div className="import-pct">{importProgress.percent}%</div>
             {importLogs.length > 0 && (
               <div className="import-logs">
                 {importLogs.map((log, i) => (

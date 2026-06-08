@@ -4,6 +4,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import { diffLines } from "diff";
+import { FileText, Heading, Sigma, Table2, ImageIcon, ChevronDown, ChevronUp } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Block } from "../App";
 import "./Editor.css";
 
@@ -65,29 +69,38 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
     );
   }
 
-  // 页面模式：按页码分组显示
+  // 页面模式：两层结构 — 外层 Page Card，内层 Block 行
   if (pageBlocks && pageBlocks.length > 0 && !block) {
-    // 提取页码并排序
     const withPage = pageBlocks.map(b => {
       let p = 0;
       try { p = JSON.parse(b.metadata || "{}").page || 0; } catch {}
       return { block: b, page: p };
     }).filter(wp => wp.page > 0).sort((a, b) => a.page - b.page || a.block.order_idx - b.block.order_idx);
-    // 按 page 分组
+
     const groups: { page: number; blocks: Block[]; empty: boolean }[] = [];
     for (const { block, page } of withPage) {
       const last = groups[groups.length - 1];
-      if (last && last.page === page) {
-        last.blocks.push(block);
-      } else {
-        groups.push({ page, blocks: [block], empty: false });
-      }
+      if (last && last.page === page) { last.blocks.push(block); }
+      else { groups.push({ page, blocks: [block], empty: false }); }
     }
     for (const group of groups) {
-      if (group.blocks.every((b) => b.block_type === 'empty')) {
-        group.empty = true;
-      }
+      if (group.blocks.every((b) => b.block_type === 'empty')) group.empty = true;
     }
+
+    const typeIcon: Record<string, React.ReactNode> = {
+      heading: <Heading className="size-3" />,
+      text: <FileText className="size-3" />,
+      interline_equation: <Sigma className="size-3" />,
+      table: <Table2 className="size-3" />,
+      image: <ImageIcon className="size-3" />,
+    };
+    const typeVariant: Record<string, "default" | "secondary" | "outline"> = {
+      heading: "default",
+      text: "secondary",
+      interline_equation: "secondary",
+      table: "outline",
+      image: "secondary",
+    };
 
     return (
       <div className="block-editor page-mode">
@@ -95,37 +108,84 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
           <span className="be-block-type">📄 页面内容</span>
           <span className="editor-header-pages">
             {groups.map((g) => (
-              <button key={g.page} className={`page-btn${currentPage === g.page ? ' active' : ''}${g.empty ? ' page-btn-empty' : ''}`}
+              <button key={g.page}
+                className={`page-btn${currentPage === g.page ? ' active' : ''}${g.empty ? ' page-btn-empty' : ''}`}
                 onClick={() => {
-                  const el = document.querySelector(`.page-group[data-page="${g.page}"]`);
+                  const el = document.querySelector(`[data-page-group="${g.page}"]`);
                   el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-                }}
-              >{g.page}</button>
+                }}>{g.page}</button>
             ))}
           </span>
-          <span className="editor-header-count">{pageBlocks.length} 行</span>
+          <span className="editor-header-count">
+            {groups.filter(g => !g.empty).length} 页 · {withPage.filter(wp => wp.block.block_type !== 'empty').length} 块
+          </span>
         </div>
-        <div className="page-blocks-list">
-          {groups.map((g, gi) => (
-            <div key={gi} className={`page-group${g.empty ? ' page-group-empty' : ''}${currentPage === g.page ? ' page-group-active' : ''}`} data-page={g.page}>
-              <div className="page-group-header">— p{g.page} —</div>
-              {g.blocks.map((b) => {
-                const isLong = b.content && b.content.length > 60;
-                const expanded = expandedBlocks.has(b.id);
-                return (
-                <div key={b.id} className={`page-block-row ${b.block_type}${isLong && !expanded ? ' clamped' : ''}${expanded ? ' expanded' : ''}`} data-block-id={b.id}
-                  onMouseEnter={() => onHoverBlock?.(b)}
-                  onMouseLeave={() => onHoverBlock?.(null)}
-                  onClick={() => { if (isLong) { setExpandedBlocks(prev => { const next = new Set(prev); if (next.has(b.id)) next.delete(b.id); else next.add(b.id); return next; }); setTimeout(() => onBlockToggle?.(), 0); } }}>
-                  <span className="pbr-type">{b.block_type === "heading" ? `H${b.level}` : b.block_type === "empty" ? "" : "·"}</span>
-                  <span className="pbr-content">{b.content || (b.block_type === "empty" ? "\u00A0" : "")}</span>
-                  {isLong && <span className="pbr-toggle">{expanded ? '▲' : '▼'}</span>}
-                </div>
-                );
-              })}
-            </div>
-          ))}
-        </div>
+
+        <ScrollArea className="page-blocks-scroll">
+          <div className="page-blocks-list p-2 space-y-2">
+            {groups.map((g) => {
+              const nonEmpty = g.blocks.filter(b => b.block_type !== 'empty');
+              return (
+                <Card
+                  key={g.page}
+                  data-page-group={g.page}
+                  className={`page-card${g.empty ? ' page-card-empty' : ''}${currentPage === g.page ? ' page-card-active' : ''}`}
+                >
+                  <CardHeader className="page-card-header">
+                    <CardTitle className="page-card-title">
+                      <span>p{g.page}</span>
+                      {g.empty ? (
+                        <Badge variant="outline" className="text-[10px] h-4 px-1.5 opacity-50">空页</Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{nonEmpty.length} 块</Badge>
+                      )}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="page-card-body">
+                    {nonEmpty.length === 0 ? (
+                      <div className="page-block-empty">（此页无识别内容）</div>
+                    ) : (
+                      nonEmpty.map((b) => {
+                        const btype = b.block_type || 'text';
+                        const isLong = b.content && b.content.length > 80;
+                        const expanded = expandedBlocks.has(b.id);
+                        return (
+                          <div key={b.id}
+                            className={`page-block-row ${btype}${isLong && !expanded ? ' clamped' : ''}${expanded ? ' expanded' : ''}`}
+                            data-block-id={b.id}
+                            onMouseEnter={() => onHoverBlock?.(b)}
+                            onMouseLeave={() => onHoverBlock?.(null)}
+                            onClick={() => {
+                              if (isLong) {
+                                setExpandedBlocks(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                                  return next;
+                                });
+                                setTimeout(() => onBlockToggle?.(), 0);
+                              }
+                            }}
+                          >
+                            <Badge variant={typeVariant[btype] || "secondary"} className="pbr-badge">
+                              {typeIcon[btype]}
+                              {btype === 'heading' ? <span className="ml-0.5 text-[10px]">H{b.level}</span> : null}
+                            </Badge>
+                            <span className="pbr-content">{b.content}</span>
+                            {isLong && (
+                              <span className="pbr-toggle">
+                                {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        </ScrollArea>
       </div>
     );
   }
