@@ -704,7 +704,7 @@ function App() {
             <Panel defaultSize="18%" minSize={200} maxSize="30%" className="panel-left">
               <div className="sidebar-panel">
                 <div className="sidebar-header">
-                  <span>📑 语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</span>
+                  <span>语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</span>
                 </div>
                 <div className="sidebar-content" style={{ flex: 3 }}>
                   <TOC nodes={tocTree} onSelect={handleSelectBlock} />
@@ -765,14 +765,14 @@ function App() {
             {/* 右栏：流程管线 + 智能对话，固定宽度 */}
             <div className="sidebar-panel sidebar-tools" style={{ width: 280 }}>
               <div className="sidebar-section">
-                <div className="sidebar-header">⚙️ 流程管线</div>
+                <div className="sidebar-header">流程管线</div>
                 <div className="sidebar-content">
                   <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
                 </div>
               </div>
               <div className="sidebar-divider" />
               <div className="sidebar-section">
-                <div className="sidebar-header">💬 智能对话</div>
+                <div className="sidebar-header">智能对话</div>
                 <div className="sidebar-content">
                   <AgentConsole />
                 </div>

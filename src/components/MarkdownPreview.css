@@ -11,7 +11,7 @@
   font-weight: 650;
   color: oklch(var(--muted-foreground));
   border-bottom: 1px solid oklch(var(--border));
-  background: oklch(var(--surface-alt) / 0.5);
+  background: oklch(var(--surface-alt));
   flex-shrink: 0;
   letter-spacing: 0.03em;
 }
@@ -30,6 +30,7 @@
 
 .mdp-empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   height: 100%;
@@ -37,6 +38,24 @@
   font-size: 13px;
   opacity: 0.35;
   font-weight: 500;
+  gap: 10px;
+  padding: 30px 20px;
+}
+
+.mdp-empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: oklch(var(--surface-alt) / 0.5);
+  border: 1px solid oklch(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mdp-empty-icon svg {
+  width: 22px;
+  height: 22px;
 }
 
 .mdp-toolbar {
@@ -45,7 +64,7 @@
   justify-content: space-between;
   padding: 5px 10px;
   border-bottom: 1px solid oklch(var(--border));
-  background: oklch(var(--surface-alt) / 0.5);
+  background: oklch(var(--surface-alt));
   flex-shrink: 0;
 }
 

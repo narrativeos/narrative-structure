@@ -9,7 +9,7 @@
   align-items: center;
   gap: 7px;
   padding: 5px 12px;
-  background: oklch(var(--surface-alt) / 0.5);
+  background: oklch(var(--surface-alt));
   border-bottom: 1px solid oklch(var(--border));
   font-size: 11px;
   flex-shrink: 0;
@@ -287,21 +287,39 @@
   justify-content: center;
   height: 100%;
   color: oklch(var(--muted-foreground));
-  gap: 8px;
+  gap: 10px;
+  padding: 40px 20px;
 }
 
 .editor-empty-icon {
-  font-size: 48px;
-  opacity: 0.3;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: oklch(var(--surface-alt) / 0.6);
+  border: 1px solid oklch(var(--border));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.editor-empty-icon svg {
+  width: 24px;
+  height: 24px;
+  color: oklch(var(--muted-foreground));
+  opacity: 0.5;
 }
 
 .editor-empty p {
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: oklch(var(--muted-foreground));
 }
 
 .editor-empty-hint {
-  font-size: 12px !important;
-  opacity: 0.6;
+  font-size: 11px !important;
+  opacity: 0.5;
+  font-weight: 400;
 }
 
 /* ---- 页面 Card 列表 ---- */

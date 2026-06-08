@@ -62,9 +62,14 @@ export default function BlockEditor({ block, pageBlocks, onChange, onHoverBlock,
   if (!block && !pageBlocks?.length) {
     return (
       <div className="editor-empty">
-        <div className="editor-empty-icon">📝</div>
+        <div className="editor-empty-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        </div>
         <p>选择一个块开始编辑</p>
-        <p className="editor-empty-hint">在左侧目录树中点击任意标题，或滚动 PDF</p>
+        <p className="editor-empty-hint">在左侧目录树中点击任意标题，或滚动 PDF 自动加载</p>
       </div>
     );
   }

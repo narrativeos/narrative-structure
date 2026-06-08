@@ -16,7 +16,7 @@
   letter-spacing: 0.05em;
   color: oklch(var(--muted-foreground));
   border-bottom: 1px solid oklch(var(--border));
-  background: oklch(var(--surface-alt) / 0.5);
+  background: oklch(var(--surface-alt));
   flex-shrink: 0;
   min-height: 28px;
 }

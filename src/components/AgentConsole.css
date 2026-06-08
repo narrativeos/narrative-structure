@@ -37,13 +37,17 @@
 
 .ac-btn {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   background: linear-gradient(135deg, oklch(0.6 0.18 250), oklch(0.52 0.22 250));
   color: #fff;
   border: none;
   border-radius: 7px;
-  padding: 7px 0;
+  padding: 8px 0;
   cursor: pointer;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 650;
   transition: all 0.15s;
   letter-spacing: 0.01em;
