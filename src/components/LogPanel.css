@@ -2,7 +2,7 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: oklch(var(--surface));
+  background: oklch(var(--card));
 }
 
 .log-header {
