@@ -385,6 +385,8 @@ fn open_project_inner(
     state: &tauri::State<'_, ProjectState>,
     project_path: PathBuf,
 ) -> Result<String, String> {
+    let start = std::time::Instant::now();
+    
     // 1. 验证目录存在
     if !project_path.is_dir() {
         return Err(format!("目录不存在: {}", project_path.display()));
@@ -399,6 +401,9 @@ fn open_project_inner(
             db_path.display()
         ));
     }
+    
+    let validate_time = start.elapsed();
+    eprintln!("[PERF] open_project: 路径验证 = {:.3}ms", validate_time.as_secs_f64() * 1000.0);
 
     // 3. 关闭旧连接 (drop 自动处理)
     {
@@ -407,18 +412,27 @@ fn open_project_inner(
     }
 
     // 4. 打开新连接
+    let db_open_start = start.elapsed();
     let conn = Connection::open(&db_path).map_err(|e| format!("无法打开数据库: {}", e))?;
+    let db_open_time = start.elapsed() - db_open_start;
+    eprintln!("[PERF] open_project: 数据库打开 = {:.3}ms", db_open_time.as_secs_f64() * 1000.0);
 
     // 5. 应用 PRAGMA
+    let pragma_start = start.elapsed();
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
          PRAGMA busy_timeout=5000;",
     )
     .map_err(|e| format!("PRAGMA 设置失败: {}", e))?;
+    let pragma_time = start.elapsed() - pragma_start;
+    eprintln!("[PERF] open_project: PRAGMA 设置 = {:.3}ms", pragma_time.as_secs_f64() * 1000.0);
 
     // 迁移：为旧数据库添加 original_content 列
+    let migrate_start = start.elapsed();
     let _ = conn.execute_batch("ALTER TABLE blocks ADD COLUMN original_content TEXT DEFAULT ''");
+    let migrate_time = start.elapsed() - migrate_start;
+    eprintln!("[PERF] open_project: 迁移检查 = {:.3}ms", migrate_time.as_secs_f64() * 1000.0);
 
     // 6. 更新全局状态
     {
@@ -429,6 +443,9 @@ fn open_project_inner(
         let mut path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
         *path_guard = Some(project_path.clone());
     }
+    
+    let total_time = start.elapsed();
+    eprintln!("[PERF] open_project: 总耗时 = {:.3}ms", total_time.as_secs_f64() * 1000.0);
 
     Ok(format!("项目已打开: {}", project_path.display()))
 }

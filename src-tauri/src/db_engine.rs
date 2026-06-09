@@ -78,9 +78,12 @@ fn get_block_inner(state: &tauri::State<'_, ProjectState>, id: &str) -> Result<B
 /// 获取目录树 (所有 section，按层级构建树)
 #[tauri::command]
 pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, String> {
+    let start = std::time::Instant::now();
+    
     let conn_guard = get_conn(&state)?;
     let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
 
+    let prepare_start = start.elapsed();
     let mut stmt = conn
         .prepare(
             "SELECT id, parent_id, order_idx, level, block_type,
@@ -90,7 +93,9 @@ pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, St
              ORDER BY level, order_idx",
         )
         .map_err(|e| e.to_string())?;
-
+    let prepare_time = start.elapsed() - prepare_start;
+    
+    let query_start = start.elapsed();
     let nodes: Vec<TocNode> = stmt
         .query_map([], |row| {
             Ok(TocNode {
@@ -106,9 +111,22 @@ pub fn get_toc(state: tauri::State<'_, ProjectState>) -> Result<Vec<TocNode>, St
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
-
+    let query_time = start.elapsed() - query_start;
+    
+    let tree_start = start.elapsed();
     // 构建树形结构
-    Ok(build_toc_tree(nodes))
+    let result = build_toc_tree(nodes);
+    let tree_time = start.elapsed() - tree_start;
+    
+    let total_time = start.elapsed();
+    eprintln!("[PERF] get_toc: prepare={:.3}ms query={:.3}ms build_tree={:.3}ms total={:.3}ms nodes={}", 
+        prepare_time.as_secs_f64() * 1000.0,
+        query_time.as_secs_f64() * 1000.0,
+        tree_time.as_secs_f64() * 1000.0,
+        total_time.as_secs_f64() * 1000.0,
+        result.len());
+    
+    Ok(result)
 }
 
 /// 递归构建 TOC 树
@@ -378,9 +396,12 @@ pub fn get_blocks_paginated(
     limit: i32,
     offset: i32,
 ) -> Result<Vec<Block>, String> {
+    let start = std::time::Instant::now();
+    
     let conn_guard = get_conn(&state)?;
     let conn = conn_guard.as_ref().ok_or("没有打开的项目")?;
 
+    let prepare_start = start.elapsed();
     let mut stmt = conn
         .prepare(
             "SELECT id, parent_id, order_idx, level, block_type, content, original_content, metadata,
@@ -390,7 +411,9 @@ pub fn get_blocks_paginated(
              LIMIT ?1 OFFSET ?2",
         )
         .map_err(|e| e.to_string())?;
+    let prepare_time = start.elapsed() - prepare_start;
 
+    let query_start = start.elapsed();
     let blocks: Vec<Block> = stmt
         .query_map(params![limit, offset], |row| {
             Ok(Block {
@@ -410,6 +433,15 @@ pub fn get_blocks_paginated(
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+    let query_time = start.elapsed() - query_start;
+    
+    let total_time = start.elapsed();
+    eprintln!("[PERF] get_blocks_paginated: limit={} offset={} prepare={:.3}ms query={:.3}ms total={:.3}ms rows={}", 
+        limit, offset,
+        prepare_time.as_secs_f64() * 1000.0,
+        query_time.as_secs_f64() * 1000.0,
+        total_time.as_secs_f64() * 1000.0,
+        blocks.len());
 
     Ok(blocks)
 }

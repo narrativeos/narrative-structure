@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "NarrativeStructure — 文档智能化重构工作台"
 authors = ["narrativeos"]
 edition = "2021"
+default-run = "narrative-structure"
 
 [dependencies]
 tauri = { version = "2", features = [] }
@@ -19,9 +20,26 @@ percent-encoding = "2"
 mime_guess = "2"
 unicode-normalization = "0.1"
 
+# Tauri MCP Bridge — 让 AI 智能体通过 WebSocket 控制 WebView（仅 debug 模式）
+tauri-plugin-mcp-bridge = { version = "0.1", optional = true }
+
+[features]
+default = ["mcp-bridge"]
+mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# ============================================================
+# Debug 配置 — 保留完整调试符号，确保断点可命中
+# ============================================================
+[profile.dev]
+debug = true
+split-debuginfo = "packed"
+
+# ============================================================
+# Release 配置 — 生产环境优化
+# ============================================================
 [profile.release]
 panic = "abort"
 codegen-units = 1

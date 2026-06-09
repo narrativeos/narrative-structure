@@ -570,10 +570,10 @@ fn match_lines_to_pages(
             let page_penalty = if candidate_page < last_page {
                 0.55
             } else if candidate_page == last_page {
-                1.08 // 同页加分，降低误跳到下一页的概率
+                1.02 // 同页轻微加分，不过度抑制跳页
             } else {
-                // 向前跳页惩罚：单页跳 0.78，两页跳 0.56，三页及以上最低 0.45
-                1.0 - (page_gap as f64 * 0.22).min(0.55)
+                // 向前跳页惩罚：单页跳 0.92，两页跳 0.84，三页及以上最低 0.65
+                1.0 - (page_gap as f64 * 0.08).min(0.35)
             };
 
             let span_distance = (pos.saturating_sub(span_cursor)) as f64;
@@ -587,7 +587,7 @@ fn match_lines_to_pages(
                 if candidate_top >= last_top {
                     y_penalty += ((candidate_top - last_top) / page_height).min(0.15);
                 } else {
-                    y_penalty *= 0.78; // 同页逆序惩罚放宽，避免多栏/复杂排版误丢弃
+                    y_penalty *= 0.65;
                 }
             } else if candidate_page == last_page + 1 {
                 if candidate_top > page_height * 0.3 {
@@ -616,6 +616,7 @@ fn match_lines_to_pages(
             } else {
                 0.45 // 单页跳至少 0.45
             };
+            // best_score 已经是 best adjusted_score（因为 best_score = adjusted_score 在循环内更新）
             if page_jump && best_score < min_jump_score {
                 eprintln!(
                     "[page-map] p{} → p{} REJECTED @行{}: \"{}\" (score={:.3} < {:.2})",
