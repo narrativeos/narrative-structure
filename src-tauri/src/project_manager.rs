@@ -81,33 +81,42 @@ fn dirs_next() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
 }
 
-/// 生成时间序列 ID: YYYYMMDD_HHMMSS_<4位随机hex>
-fn timestamp_id() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    // 简单 hash 取后 4 位 hex
-    let suffix = format!("{:08x}", now);
-    let suffix = &suffix[suffix.len().saturating_sub(4)..];
-
-    // 格式化时间
+/// 生成日期格式的 ID: YYYY-MM-DD[_序号]（同一天重复创建时加 _2/_3 后缀）
+fn date_id() -> String {
     use std::time::SystemTime;
-    #[allow(deprecated)]
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
     let days = secs / 86400;
-    let day_secs = secs % 86400;
-    let hours = day_secs / 3600;
-    let mins = (day_secs % 3600) / 60;
-    let secs_rem = day_secs % 60;
-
-    // 计算年月日 (简化)
     let (y, m, d) = days_to_ymd(days as i64);
+    let base = format!("{:04}-{:02}-{:02}", y, m, d);
 
-    format!("{:04}{:02}{:02}_{:02}{:02}{:02}_{}", y, m, d, hours, mins, secs_rem, suffix)
+    // 检查是否已有同一天的项目，自动加后缀
+    let projects_dir = project_root_dir().join("Projects");
+    if projects_dir.is_dir() {
+        let mut seq = 1u32;
+        for entry in std::fs::read_dir(&projects_dir).into_iter().flatten() {
+            if let Ok(e) = entry {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name == base && seq == 1 {
+                    seq = 2;
+                } else if name.starts_with(&base) {
+                    // 提取后缀数字
+                    let rest = &name[base.len()..];
+                    if rest.starts_with('_') {
+                        if let Ok(n) = rest[1..].parse::<u32>() {
+                            seq = seq.max(n + 1);
+                        }
+                    }
+                }
+            }
+        }
+        if seq > 1 {
+            return format!("{}_{}", base, seq);
+        }
+    }
+    base
 }
 
 /// 简化的 unix epoch days → YMD
@@ -202,8 +211,8 @@ fn import_new_project_blocking(
     let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
     page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0), None);
 
-    // 项目文件夹 = <project_root>/Projects/<timestamp_id>/
-    let project_id = timestamp_id();
+    // 项目文件夹 = <project_root>/Projects/<date_id>/
+    let project_id = date_id();
     let project_dir = project_root_dir().join("Projects").join(&project_id);
     let log_path = project_dir.join("import.log");
     page_mapper::emit_log(&app_handle, &format!("[import] 项目目录: {}", project_dir.display()), Some(&log_path));
