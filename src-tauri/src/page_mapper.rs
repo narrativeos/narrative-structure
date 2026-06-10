@@ -2,17 +2,78 @@
 //!
 //! 流程: flatten_bbox_spans → mark_header_footer_candidates → match_lines_to_pages → apply_bbox_page_mapping
 
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Deserialize;
 use tauri::Emitter;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::markdown_parser::ParsedBlock;
+
+// =========================================================================
+// content_list.json 数据结构
+// =========================================================================
+
+/// content_list.json 的单个条目
+/// 注意: image/table/list/chart/code 等类型没有 text 字段，而是用 content/img_path
+#[derive(Debug, Clone, Deserialize)]
+struct ContentListItem {
+    #[serde(rename = "type")]
+    item_type: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    img_path: Option<String>,
+    #[serde(default)]
+    table_caption: Option<Vec<String>>,
+    #[serde(default)]
+    page_idx: usize,
+}
+
+impl ContentListItem {
+    /// 获取可用于匹配的文本内容（优先 text，回退 content，再回退 img_path）
+    fn match_text(&self) -> &str {
+        self.text.as_deref()
+            .or(self.content.as_deref())
+            .unwrap_or("")
+    }
+    
+    /// 获取在 markdown 中可搜索的标记文本
+    /// 对于 image/chart 类型，markdown 中显示为 ![](images/xxx.jpg)
+    /// 对于 table 类型，markdown 中显示为 HTML + caption 文本
+    fn marker_for_search(&self) -> &str {
+        let t = self.item_type.as_str();
+        if t == "table" {
+            // 表格在 markdown 中是 HTML，但 caption 文本会出现在 markdown 中
+            self.table_caption.as_ref()
+                .and_then(|c| c.iter().find(|s| !s.is_empty()))
+                .map(|s| s.as_str())
+                .or_else(|| {
+                    // 无 caption 时，尝试用 table_body 中提取的文本
+                    self.text.as_deref()
+                })
+                .or(self.img_path.as_deref())
+                .unwrap_or("")
+        } else if t == "image" || t == "chart" {
+            // 图片/图表在 markdown 中表现为 ![](images/xxx.jpg)
+            // img_path 优先（精确匹配 markdown），回退 content/OCR 文本
+            if let Some(path) = self.img_path.as_deref() {
+                if !path.is_empty() { return path; }
+            }
+            self.match_text()
+        } else {
+            // text, list, equation 等直接匹配文本
+            self.match_text()
+        }
+    }
+}
 
 // =========================================================================
 // 数据结构
@@ -111,6 +172,184 @@ fn emit_stage_progress(
         value.round().clamp(min_percent as f64, max_percent as f64) as u8
     };
     emit_progress(app, stage, percent, detail);
+}
+
+// =========================================================================
+// content_list 页码映射（优先使用）
+// =========================================================================
+
+/// 使用 content_list.json 的 page_idx 做页码映射
+///
+/// 算法：每页取最后一个非 discarded 条目的文本作为"页尾标记"，
+/// 在 markdown blocks 中顺序搜索这些标记，以标记为界切分页面。
+/// 两标记之间的所有行属于前一页。
+pub fn apply_content_list_page_mapping(
+    app: &tauri::AppHandle,
+    content_list_path: &Path,
+    blocks: &mut [ParsedBlock],
+) -> bool {
+    let items: Vec<ContentListItem> = match load_content_list(content_list_path) {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("[page-map] 无法加载 content_list.json: {}", e);
+            return false;
+        }
+    };
+
+    let n_blocks = blocks.len();
+    emit_progress(app, "加载信息层", 6, &format!(
+        "content_list: {} 条", items.len()
+    ));
+
+    // === 步骤1: 按 page_idx 分组，提取每页的"页首标记" ===
+    // 只用 text/list 类型（它们单行可匹配，不会跨行）
+    // 对于缺标记的页（如纯表格页），后续用最近邻回填
+    let text_types: &[&str] = &["text", "list"];
+    let mut page_markers: BTreeMap<usize, String> = BTreeMap::new();
+
+    for item in items.iter() {
+        if !text_types.contains(&item.item_type.as_str()) { continue; }
+        let marker = item.marker_for_search();
+        if marker.is_empty() || marker.len() < 5 { continue; }
+        page_markers.entry(item.page_idx).or_insert_with(|| marker.to_string());
+    }
+
+    let norm_markers: Vec<(usize, String)> = page_markers.into_iter()
+        .map(|(p, t)| (p + 1, normalize_text(&t)))
+        .collect();
+
+    eprintln!("[page-map] {} 个页尾标记", norm_markers.len());
+    emit_progress(app, "匹配页码", 10, &format!(
+        "{} 个页尾标记", norm_markers.len()
+    ));
+
+    // === 步骤2: 在 blocks 中顺序搜索页尾标记 ===
+    let mut boundaries: Vec<(usize, usize)> = Vec::new(); // (block_index, target_page)
+    let mut mi = 0usize;
+
+    for bi in 0..n_blocks {
+        if mi >= norm_markers.len() { break; }
+        let block_text = normalize_text(&blocks[bi].content);
+        let (target_page, ref marker_text) = norm_markers[mi];
+
+        if !marker_text.is_empty()
+            && (block_text == *marker_text || block_text.contains(marker_text.as_str()))
+        {
+            boundaries.push((bi, target_page));
+            mi += 1;
+        }
+
+        if bi % 2000 == 0 {
+            emit_stage_progress(app, "匹配页码", bi, n_blocks, 10, 55,
+                &format!("搜索标记 {}/{}", mi + 1, norm_markers.len()));
+        }
+    }
+
+    let b_count = boundaries.len();
+    eprintln!("[page-map] 找到 {} 个页边界", b_count);
+
+    if b_count == 0 {
+        eprintln!("[page-map] 未找到页边界，回退顺序段落匹配");
+        return fallback_sequential_match(blocks, &items);
+    }
+
+    // === 步骤3: 按边界赋值 ===
+    // 从 blocks[0] 到第一个边界 → 第一页
+    // 从边界 N 到边界 N+1 → 边界 N 对应的页
+    // 最后一个边界之后 → 最后一页
+    let first_boundary_block = boundaries[0].0;
+    let first_page = 1usize; // markdown 开头是 page 1
+
+    for bi in 0..first_boundary_block {
+        blocks[bi].metadata = format!("{{\"page\":{}}}", first_page);
+    }
+
+    for wi in 0..b_count.wrapping_sub(1) {
+        let (start_bi, page) = boundaries[wi];
+        let end_bi = boundaries[wi + 1].0;
+        for bi in start_bi..end_bi {
+            blocks[bi].metadata = format!("{{\"page\":{}}}", page);
+        }
+    }
+
+    // 最后一个边界到末尾
+    let (last_bi, last_page) = boundaries[b_count - 1];
+    for bi in last_bi..n_blocks {
+        blocks[bi].metadata = format!("{{\"page\":{}}}", last_page);
+    }
+
+    // 统计
+    let mut distinct: Vec<i64> = blocks.iter().filter_map(|b| {
+        serde_json::from_str::<serde_json::Value>(&b.metadata).ok()
+            .and_then(|v| v.get("page").and_then(|p| p.as_i64()).filter(|&p| p > 0))
+    }).collect();
+    distinct.sort();
+    distinct.dedup();
+
+    emit_progress(app, "匹配页码", 65, &format!(
+        "{} 边界, {} 个页码", b_count, distinct.len()
+    ));
+    eprintln!("[page-map] 完成: {} 边界 → {} 页码", b_count, distinct.len());
+
+    true
+}
+
+/// 回退方案：顺序段落匹配（当页尾标记策略失败时）
+fn fallback_sequential_match(blocks: &mut [ParsedBlock], items: &[ContentListItem]) -> bool {
+    let paragraphs = split_blocks_into_paragraphs(blocks);
+    let mut cl_idx = 0usize;
+    let n_cl = items.len();
+
+    for para in paragraphs.iter() {
+        if cl_idx >= n_cl { break; }
+        let first = normalize_text(blocks[para[0]].content.trim_start_matches('#').trim());
+        let mut found = false;
+
+        while cl_idx < n_cl {
+            let ct = normalize_text(items[cl_idx].match_text());
+            if ct.len() < 3 || first.contains(&ct) || ct.contains(&first) {
+                found = true;
+                break;
+            }
+            cl_idx += 1;
+        }
+        if !found { break; }
+
+        let page = items[cl_idx].page_idx + 1;
+        for &bi in para {
+            blocks[bi].metadata = format!("{{\"page\":{}}}", page);
+        }
+        cl_idx += 1;
+    }
+    false
+}
+
+/// 将 blocks 按空行分割为段落，返回每个段落的 block 索引范围
+fn split_blocks_into_paragraphs(blocks: &[ParsedBlock]) -> Vec<Vec<usize>> {
+    let mut paragraphs: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    for (i, block) in blocks.iter().enumerate() {
+        if block.block_type == "empty" {
+            if !current.is_empty() {
+                paragraphs.push(std::mem::take(&mut current));
+            }
+        } else {
+            current.push(i);
+        }
+    }
+    if !current.is_empty() {
+        paragraphs.push(current);
+    }
+    paragraphs
+}
+
+/// 加载 content_list.json
+fn load_content_list(path: &Path) -> Result<Vec<ContentListItem>, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|e| format!("读取 content_list.json 失败: {}", e))?;
+    let items: Vec<ContentListItem> = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 content_list.json 失败: {}", e))?;
+    Ok(items)
 }
 
 /// 一站式页码映射: 读取 _middle.json → 展开 bbox → 标记页头页脚 → 匹配 → 写入 block metadata

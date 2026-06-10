@@ -330,12 +330,30 @@ fn import_new_project_blocking(
                 parsed.iter().filter(|b| b.block_type == "heading").count()), Some(&log_path));
 
             if !parsed.is_empty() {
-                // 页码映射: bbox span 文本 → MD 行匹配
+                // 页码映射: 优先使用 content_list.json（page_idx 最可靠）
                 let assets_dir = project_dir.join("assets");
+                let content_list_mapped = if let Some(cl_path) = find_file_in_dir(&assets_dir, |n| n.contains("content_list") && !n.contains("v2") && n.ends_with(".json")) {
+                    page_mapper::emit_progress(&app_handle, "加载信息层", 6, "使用 content_list.json page_idx...");
+                    let ok = page_mapper::apply_content_list_page_mapping(&app_handle, &cl_path, &mut parsed);
+                    if ok {
+                        page_mapper::emit_log(&app_handle, "[import] content_list 页码映射完成", Some(&log_path));
+                    } else {
+                        page_mapper::emit_log(&app_handle, "[import] content_list 映射失败，将回退 _middle.json", Some(&log_path));
+                    }
+                    ok
+                } else {
+                    false
+                };
+
+                // 如有 _middle.json 且 content_list 未覆盖所有行，作为补充
                 if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-                    page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
-                    page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed);
-                    page_mapper::emit_log(&app_handle, "[import] 信息层加载完成", Some(&log_path));
+                    if content_list_mapped {
+                        page_mapper::emit_log(&app_handle, "[import] _middle.json 已跳过（已使用 content_list）", Some(&log_path));
+                    } else {
+                        page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
+                        page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed);
+                        page_mapper::emit_log(&app_handle, "[import] 信息层加载完成", Some(&log_path));
+                    }
                 }
 
                 page_mapper::emit_log(&app_handle, "[import] 写入数据库阶段开始", Some(&log_path));
