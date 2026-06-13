@@ -51,31 +51,24 @@ function countNodes(node: TocNode): number {
 // =========================================================================
 // 全局截图函数 — 供 MCP / 外部调用
 // =========================================================================
-// 使用 dom-to-image-more 截取整个应用界面，保存为 PNG，返回 base64
-// 通过 window.screenshot() 调用，不依赖任何操作系统命令
-// dom-to-image-more 使用 SVG foreignObject，不会遇到 oklch 解析问题
+// 注意：html2canvas v1.x 不支持 Tailwind CSS 3+ 使用的 oklch() 颜色函数
+// 在 Tauri 桌面应用中，请使用 MCP 的 takeScreenshot 工具（Playwright 原生截图）
+// 此函数仅作为备用方案，在纯 RGB 颜色的页面上可用
 async function takeScreenshot(): Promise<string> {
   try {
-    // 动态导入 dom-to-image-more（避免影响主 bundle）
-    const domtoimage = await import('dom-to-image-more');
+    // 动态导入 html2canvas（避免影响主 bundle）
+    const html2canvasModule = await import('html2canvas');
+    const html2canvas = html2canvasModule.default;
     
-    // 使用 toBlob 方式（更高效）
-    const blob = await domtoimage.toBlob(document.body, {
-      height: document.body.scrollHeight,
-      width: document.body.scrollWidth,
+    const canvas = await html2canvas(document.body, {
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      scale: window.devicePixelRatio || 1,
+      logging: false,
     });
     
-    // 转为 base64
-    const reader = new FileReader();
-    const base64 = await new Promise<string>((resolve, reject) => {
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        // 去掉 "data:image/png;base64," 前缀
-        resolve(result.split(',')[1] || '');
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    const dataUrl = canvas.toDataURL('image/png');
+    const base64 = dataUrl.split(',')[1];
     
     // 调用后端保存文件
     try {
@@ -84,7 +77,13 @@ async function takeScreenshot(): Promise<string> {
     
     return base64;
   } catch (e: any) {
-    throw new Error(`截图失败: ${e.message}`);
+    // oklch 颜色会导致 html2canvas 失败
+    // 提示用户使用 MCP 工具的 Playwright 原生截图
+    throw new Error(
+      '截图失败: ' + e.message +
+      '. 由于本应用使用 Tailwind CSS oklch 颜色，html2canvas 无法解析。' +
+      '请使用 MCP 工具的 takeScreenshot 命令进行截图。'
+    );
   }
 }
 
