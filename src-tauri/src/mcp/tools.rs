@@ -258,15 +258,71 @@ pub fn list_tools() -> Vec<Value> {
         // --- 系统工具 ---
         json!({
             "name": "screenshot",
-            "description": "截取当前屏幕并返回 PNG 图片的 base64 编码。用于调试 GUI 显示效果，如确认 PDF 是否正确渲染。仅支持 macOS（使用 screencapture 命令）",
+            "description": "截取当前应用界面。MCP 独立进程无法直接访问前端，请使用 Playwright MCP 的 playwright_screenshot 工具进行截图。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        // --- 前端诊断工具 ---
+        // 这些工具提供使用说明，指导 AI agent 使用 Playwright MCP 观察前端状态
+        json!({
+            "name": "get_page_text",
+            "description": "获取当前页面所有可见文本内容。使用 Playwright MCP 的 playwright_get_visible_text 工具。用于快速了解当前显示了什么内容、哪个项目被打开、当前编辑区的内容等。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_page_html",
+            "description": "获取当前页面 HTML 结构。使用 Playwright MCP 的 playwright_get_visible_html 工具。用于详细分析 DOM 结构、组件状态、面板布局等。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "output_path": {
+                    "selector": {
                         "type": "string",
-                        "description": "可选：截图保存的绝对路径。如果不指定，保存到 /tmp/narrative-screenshot-*.png"
+                        "description": "可选：CSS 选择器，只获取特定区域"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "最大返回字符数（默认 20000）",
+                        "default": 20000
                     }
                 }
+            }
+        }),
+        json!({
+            "name": "get_console_logs",
+            "description": "获取浏览器控制台日志。使用 Playwright MCP 的 playwright_console_logs 工具。用于调试前端错误、查看项目加载进度。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "日志类型：all, error, warning, log, info, debug",
+                        "default": "all"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "返回数量上限（默认 50）",
+                        "default": 50
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "evaluate_js",
+            "description": "在浏览器中执行任意 JavaScript 代码。使用 Playwright MCP 的 playwright_evaluate 工具。用于获取任意前端状态、检查变量值等。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "script": {
+                        "type": "string",
+                        "description": "要执行的 JavaScript 代码"
+                    }
+                },
+                "required": ["script"]
             }
         }),
     ]
