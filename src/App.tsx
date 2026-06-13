@@ -81,7 +81,6 @@ function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
   const [projectKey, setProjectKey] = useState(0);
-  const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
   const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
   const [pageRect, setPageRect] = useState<{left:number;top:number;width:number;height:number}|null>(null);
@@ -103,11 +102,6 @@ function App() {
   const pageBlocksRef = useRef<Block[] | null>(null);
   const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
   const [pageInput, setPageInput] = useState("");
-
-  // 区块标注开关 → 同步 iframe 信息层
-  useEffect(() => {
-    pdfIframeRef.current?.contentWindow?.postMessage({ type: "set-overlay", visible: showAnnotations }, "*");
-  }, [showAnnotations]);
 
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
@@ -145,13 +139,11 @@ function App() {
       setLines(newLines);
     };
     drawLinesRef.current = drawAllLines;
-    // 提取当前页文本 → 请求 bbox
-    const requestBboxForCurrentPage = () => {
-      const blocks = pageBlocksRef.current;
-      if (!blocks?.length) return;
-      const iframe = pdfIframeRef.current?.contentWindow;
-      if (!iframe) return;
-      const page = currentPageRef.current;
+    // 提取当前页文本 → 请求 bbox (react-pdf 模式：不再需要 iframe postMessage)
+      const requestBboxForCurrentPage = () => {
+        const blocks = pageBlocksRef.current;
+        if (!blocks?.length) return;
+        const page = currentPageRef.current;
       const pageTexts = blocks
         .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
         .filter(b => b.block_type !== 'empty' && b.content.trim())
@@ -161,30 +153,13 @@ function App() {
       const reqId = ++bboxRequestIdRef.current;
       (window as any).__flyRows = blocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
       (window as any).__flyReqId = reqId;
-      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
+      // TODO: react-pdf 模式下 bbox 定位需要重新实现
     };
     requestBboxRef.current = requestBboxForCurrentPage;
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
-        // 滚动时也刷新 bbox 位置（debounce 150ms）
-        const iframeWin = pdfIframeRef.current?.contentWindow;
-        if (iframeWin) {
-          clearTimeout(scrollBboxTimerRef.current);
-          const reqId = ++bboxRequestIdRef.current;
-          scrollBboxTimerRef.current = setTimeout(() => {
-            const texts = pageTextsRef.current;
-            if (!texts.length) return;
-            (window as any).__flyReqId = reqId;
-            iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
-          }, 150);
-        }
-        return;
-      }
-      // iframe 内 👁 按钮 → 同步父窗口 🏷️ 状态
-      if (e.data?.type === 'overlay-toggled') {
-        setShowAnnotations(e.data.visible);
         return;
       }
       const reqId = (window as any).__flyReqId;
@@ -199,9 +174,10 @@ function App() {
     window.addEventListener('message', handler);
     let scrollEl: Element | null = null;
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
-    const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
-    return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
-  }, []);
+        // 注意：新的 react-pdf 查看器不再需要 iframe postMessage 通信
+        const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
+        return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
+      }, []);
 
   const createEmptyPagePlaceholder = useCallback((page: number): Block => ({
     id: `empty-page-${page}`,
@@ -549,7 +525,8 @@ function App() {
         if (meta.page) targetPage = meta.page as number;
       } catch {}
       if (targetPage > 0) {
-        pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: targetPage }, "*");
+        currentPageRef.current = targetPage;
+        setDisplayPage(targetPage);
       }
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
@@ -685,7 +662,7 @@ function App() {
               if (e.key === 'Enter') {
                 const p = parseInt(pageInput, 10);
                 if (p > 0) {
-                  pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: p }, "*");
+                  handlePageChange(p);
                 }
               }
             }}
@@ -732,7 +709,7 @@ function App() {
                   <div className="workspace-pane">
                     <div className="workspace-pane-header">PDF 视图</div>
                     <div className="workspace-pane-body">
-                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
+                      <PdfViewer key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
                     </div>
                   </div>
                 </div>
@@ -742,13 +719,8 @@ function App() {
                     <div className="workspace-pane-body">
                       <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
                         onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
-                        onHoverBlock={(b) => {
-                          const iframe = pdfIframeRef.current?.contentWindow;
-                          if (b && b.block_type !== 'empty' && b.content.trim()) {
-                            iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
-                          } else {
-                            iframe?.postMessage({ type: "clear-highlight" }, "*");
-                          }
+                        onHoverBlock={(_b) => {
+                          // TODO: react-pdf 模式下 bbox highlight 需要重新实现
                         }}
                       />
                     </div>
