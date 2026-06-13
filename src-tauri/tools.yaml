@@ -1,0 +1,177 @@
+# NarrativeStructure MCP Tools Definition
+# This file provides structured tool descriptions for AI agents
+# to understand and consume NarrativeStructure functionality.
+
+version: "0.1.0"
+protocol: "mcp/stdio"
+server:
+  name: "narrative-structure-mcp"
+  binary: "narrative-mcp"
+
+categories:
+  - name: "project"
+    label: "项目管理"
+    tools:
+      - name: "open_project"
+        description: "打开一个已有的 NarrativeStructure 项目（包含 narrative.db 的目录）"
+        parameters:
+          - name: "path"
+            type: "string"
+            required: true
+            description: "项目目录的绝对路径"
+        returns: "text confirmation"
+        
+      - name: "close_project"
+        description: "关闭当前打开的项目，释放数据库连接"
+        parameters: []
+        returns: "text confirmation"
+        
+      - name: "get_project_info"
+        description: "获取当前项目的路径和基本信息（总块数、标题数等）"
+        parameters: []
+        returns: "text with project statistics"
+        
+      - name: "import_document"
+        description: "导入 MinerU 输出的 zip 压缩包到当前项目（追加模式）"
+        parameters:
+          - name: "zip_path"
+            type: "string"
+            required: true
+            description: "zip 文件的绝对路径"
+        returns: "text confirmation"
+
+  - name: "structure"
+    label: "文档结构"
+    tools:
+      - name: "get_toc"
+        description: "获取文档的目录树（TOC），返回层级化的标题结构"
+        parameters: []
+        returns: "JSON array of TOC nodes"
+        
+      - name: "get_page_stats"
+        description: "统计每个 PDF 页码包含的语义块数量"
+        parameters: []
+        returns: "text with page statistics"
+
+  - name: "blocks"
+    label: "语义块操作"
+    tools:
+      - name: "get_blocks"
+        description: "获取语义块列表（支持分页和按父节点过滤）"
+        parameters:
+          - name: "parent_id"
+            type: "string"
+            required: false
+            description: "可选：只获取指定父块下的子块"
+          - name: "limit"
+            type: "integer"
+            required: false
+            default: 100
+            description: "返回数量上限"
+          - name: "offset"
+            type: "integer"
+            required: false
+            default: 0
+            description: "偏移量"
+        returns: "JSON array of Block objects"
+        
+      - name: "get_block"
+        description: "根据 ID 获取单个语义块的完整信息"
+        parameters:
+          - name: "id"
+            type: "string"
+            required: true
+            description: "语义块的唯一 ID"
+        returns: "JSON Block object"
+        
+      - name: "get_blocks_by_page"
+        description: "根据 PDF 页码范围获取该页上的所有语义块"
+        parameters:
+          - name: "page_start"
+            type: "integer"
+            required: true
+            description: "起始页码（包含）"
+          - name: "page_end"
+            type: "integer"
+            required: true
+            description: "结束页码（包含）"
+        returns: "JSON array of Block objects"
+        
+      - name: "update_block"
+        description: "更新语义块的内容（带乐观锁版本控制）"
+        parameters:
+          - name: "id"
+            type: "string"
+            required: true
+            description: "语义块的唯一 ID"
+          - name: "content"
+            type: "string"
+            required: true
+            description: "新的内容"
+          - name: "version"
+            type: "integer"
+            required: true
+            description: "期望的当前版本号（用于乐观锁）"
+        returns: "text confirmation with new version"
+
+  - name: "search"
+    label: "搜索"
+    tools:
+      - name: "search_blocks"
+        description: "使用 FTS5 全文搜索引擎搜索语义块"
+        parameters:
+          - name: "query"
+            type: "string"
+            required: true
+            description: "搜索关键词（支持 FTS5 语法）"
+          - name: "limit"
+            type: "integer"
+            required: false
+            default: 20
+            description: "返回结果数量上限"
+        returns: "JSON array of matching Block objects"
+
+  - name: "assets"
+    label: "资源文件"
+    tools:
+      - name: "list_assets"
+        description: "列出项目 assets 目录下的所有资源文件"
+        parameters: []
+        returns: "text list of relative file paths"
+        
+      - name: "find_asset"
+        description: "在 assets 目录中搜索匹配模式的文件"
+        parameters:
+          - name: "pattern"
+            type: "string"
+            required: true
+            description: "文件名匹配模式（子串匹配）"
+        returns: "text with matching file path or not found message"
+
+# Usage Examples
+examples:
+  - name: "List all tools"
+    command: "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}' | narrative-mcp -p /path/to/project"
+    
+  - name: "Get project info"
+    command: "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"get_project_info\"}}' | narrative-mcp -p /path/to/project"
+    
+  - name: "Search for content"
+    command: "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"search_blocks\",\"arguments\":{\"query\":\"keyword\"}}}' | narrative-mcp -p /path/to/project"
+    
+  - name: "Get TOC"
+    command: "echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"get_toc\"}}' | narrative-mcp -p /path/to/project"
+
+# Block Schema
+block_schema:
+  id: "string (UUID)"
+  parent_id: "string (UUID) | null"
+  order_idx: "integer"
+  level: "integer (heading level, 0 for non-headings)"
+  block_type: "string (heading|text|interline_equation|table|image|empty)"
+  content: "string (edited content)"
+  original_content: "string (original extracted content)"
+  metadata: "string (JSON with page, position, etc.)"
+  version: "integer (optimistic lock version)"
+  created_at: "string (ISO 8601 timestamp)"
+  updated_at: "string (ISO 8601 timestamp)"

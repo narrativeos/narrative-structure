@@ -6,6 +6,10 @@ authors = ["narrativeos"]
 edition = "2021"
 default-run = "narrative-structure"
 
+[[bin]]
+name = "narrative-structure-mcp"
+path = "src/bin/narrative-structure-mcp.rs"
+
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
@@ -20,15 +24,13 @@ percent-encoding = "2"
 mime_guess = "2"
 unicode-normalization = "0.1"
 
-# Tauri MCP Bridge — 让 AI 智能体通过 WebSocket 控制 WebView（仅 debug 模式）
-tauri-plugin-mcp-bridge = { version = "0.1", optional = true }
-
-[features]
-default = ["mcp-bridge"]
-mcp-bridge = ["dep:tauri-plugin-mcp-bridge"]
+# 注意：MCP 功能已内置到 narrative-structure-mcp 独立二进制中，
+# 不再依赖 tauri-plugin-mcp-bridge（该插件已不再维护）
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# 依赖：rusqlite 已在 [dependencies] 中声明，MCP 二进制需要它
 
 # ============================================================
 # Debug 配置 — 保留完整调试符号，确保断点可命中

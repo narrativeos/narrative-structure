@@ -2,6 +2,7 @@ pub mod project_manager;
 pub mod db_engine;
 pub mod markdown_parser;
 pub mod page_mapper;
+pub mod mcp;
 
 use project_manager::ProjectState;
 use tauri::http::{Request, Response, StatusCode};
@@ -356,18 +357,10 @@ window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .register_uri_scheme_protocol("narrativestructure", asset_protocol);
-
-    // Tauri MCP Bridge — 仅在 debug 模式下启用，让 AI 智能体通过 WebSocket 控制 WebView
-    #[cfg(all(feature = "mcp-bridge", debug_assertions))]
-    {
-        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
-    }
-
-    builder
+        .register_uri_scheme_protocol("narrativestructure", asset_protocol)
         .manage(ProjectState::new())
         .invoke_handler(tauri::generate_handler![
             // project_manager
@@ -375,6 +368,7 @@ pub fn run() {
             project_manager::open_project,
             project_manager::close_project,
             project_manager::get_project_path,
+            project_manager::get_mcp_binary_path,
             project_manager::import_document,
             project_manager::list_project_files,
             project_manager::find_asset_file,

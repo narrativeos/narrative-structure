@@ -1,95 +1,608 @@
-.agent-console-compact {
+/**
+ * AgentConsole — MCP 工具面板样式
+ *
+ * 从对话界面改造为工具展示面板，
+ * 清晰展示所有可用的 MCP 工具及其参数。
+ */
+
+/* ==================== 主容器 ==================== */
+.agent-tool-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  height: 100%;
+  overflow: hidden;
+  font-size: 12px;
+  color: oklch(var(--text));
+  background: oklch(var(--bg));
+}
+
+/* ==================== 头部 ==================== */
+.atp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid oklch(var(--border));
+  background: oklch(var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.atp-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.atp-icon {
+  font-size: 14px;
+}
+
+.atp-badge {
+  background: oklch(var(--primary));
+  color: oklch(var(--primary-foreground));
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* ==================== 内容区 ==================== */
+.atp-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+.atp-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.atp-body::-webkit-scrollbar-thumb {
+  background: oklch(var(--border));
+  border-radius: 2px;
+}
+
+/* ==================== 分类区块 ==================== */
+.atp-category {
+  border-bottom: 1px solid oklch(var(--border));
+}
+
+.atp-category:last-child {
+  border-bottom: none;
+}
+
+.atp-category-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: oklch(var(--text-muted));
+  background: oklch(var(--bg-secondary) / 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.atp-count {
+  margin-left: auto;
+  background: oklch(var(--border));
+  color: oklch(var(--text-muted));
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* ==================== 工具列表 ==================== */
+.atp-tools {
   padding: 2px 0;
 }
 
-.ac-textarea {
-  background: oklch(var(--background));
-  border: 1px solid oklch(var(--border));
-  border-radius: 8px;
-  padding: 9px 11px;
-  color: oklch(var(--foreground));
-  font-size: 12px;
-  font-family: inherit;
-  line-height: 1.55;
-  outline: none;
-  resize: vertical;
-  min-height: 60px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+.atp-tool {
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
-.ac-textarea:focus {
-  border-color: oklch(var(--primary));
-  box-shadow: 0 0 0 2px oklch(var(--primary) / 0.15);
+.atp-tool:hover {
+  background: oklch(var(--bg-secondary) / 0.8);
 }
 
-.ac-textarea::placeholder {
-  color: oklch(var(--muted-foreground));
-  opacity: 0.45;
+.atp-tool-expanded {
+  background: oklch(var(--bg-secondary));
 }
 
-.ac-actions {
+.atp-tool-name {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
 }
 
-.ac-btn {
+.atp-tool-name code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  color: oklch(var(--primary));
+  background: oklch(var(--primary) / 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atp-tool-desc {
+  font-size: 11px;
+  color: oklch(var(--text-muted));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==================== 工具详情（展开） ==================== */
+.atp-tool-detail {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid oklch(var(--border) / 0.5);
+}
+
+.atp-tool-schema {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.atp-schema-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.atp-schema-label {
+  color: oklch(var(--text-muted));
+  min-width: 32px;
+  flex-shrink: 0;
+}
+
+.atp-schema-value {
+  color: oklch(var(--text));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 10px;
+}
+
+/* ==================== 调用示例 ==================== */
+.atp-tool-example {
+  background: oklch(var(--bg) / 0.8);
+  border: 1px solid oklch(var(--border));
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.atp-example-label {
+  padding: 4px 8px;
+  font-size: 9px;
+  font-weight: 600;
+  color: oklch(var(--text-muted));
+  background: oklch(var(--bg-secondary));
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.atp-tool-example pre {
+  margin: 0;
+  padding: 8px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: oklch(var(--text));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ==================== 底部状态栏 ==================== */
+.atp-footer {
+  padding: 8px 12px;
+  border-top: 1px solid oklch(var(--border));
+  background: oklch(var(--bg-secondary));
+  flex-shrink: 0;
+}
+
+.atp-connection {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.atp-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.atp-status-dot.connected {
+  background: #22c55e;
+  box-shadow: 0 0 4px #22c55e80;
+}
+
+.atp-status-dot.disconnected {
+  background: #ef4444;
+}
+
+.atp-hint {
+  font-size: 10px;
+  color: oklch(var(--text-muted));
+}
+
+.atp-hint code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+/* ==================== 暗色模式适配 ==================== */
+[data-theme="dark"] .atp-tool:hover {
+  background: oklch(var(--bg) / 0.9);
+}
+
+[data-theme="dark"] .atp-tool-expanded {
+  background: oklch(var(--bg));
+}
+
+/* ==================== 分段切换 Tabs ==================== */
+.atp-tabs {
+  display: flex;
+  border-bottom: 1px solid oklch(var(--border));
+  background: oklch(var(--bg-secondary) / 0.5);
+  flex-shrink: 0;
+}
+
+.atp-tab {
   flex: 1;
-  display: inline-flex;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: oklch(var(--text-muted));
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.atp-tab:hover {
+  color: oklch(var(--text));
+  background: oklch(var(--bg-secondary));
+}
+
+.atp-tab.active {
+  color: oklch(var(--primary));
+  border-bottom-color: oklch(var(--primary));
+  background: oklch(var(--bg));
+}
+
+/* ==================== 上下文面板 ==================== */
+.atp-context-section {
+  border-bottom: 1px solid oklch(var(--border));
+}
+
+.atp-context-section:last-child {
+  border-bottom: none;
+}
+
+.atp-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: oklch(var(--text-muted));
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.atp-context-header:hover {
+  background: oklch(var(--bg-secondary) / 0.8);
+}
+
+.atp-context-toggle {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+
+.atp-context-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.atp-context-detail {
+  padding: 4px 12px 8px;
+}
+
+.atp-context-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 10px;
+}
+
+.atp-context-label {
+  color: oklch(var(--text-muted));
+  min-width: 48px;
+  flex-shrink: 0;
+}
+
+.atp-context-value {
+  color: oklch(var(--text));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atp-context-value.atp-path {
+  font-size: 9px;
+}
+
+.atp-context-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: oklch(var(--text-muted));
+}
+
+/* ==================== 最近项目列表 ==================== */
+.atp-recent-list {
+  padding: 4px 0;
+}
+
+.atp-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+  font-size: 11px;
+  color: oklch(var(--text));
+}
+
+.atp-recent-item:hover {
+  background: oklch(var(--bg-secondary) / 0.8);
+}
+
+.atp-recent-item:focus-visible {
+  outline: 2px solid oklch(var(--primary));
+  outline-offset: -2px;
+}
+
+.atp-recent-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.atp-recent-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.atp-recent-name {
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atp-recent-time {
+  font-size: 9px;
+  color: oklch(var(--text-muted));
+}
+
+/* ==================== 无障碍焦点样式 ==================== */
+.atp-tab:focus-visible {
+  outline: 2px solid oklch(var(--primary));
+  outline-offset: -2px;
+}
+
+.atp-tool:focus-visible {
+  outline: 2px solid oklch(var(--primary));
+  outline-offset: -2px;
+}
+
+.atp-context-header:focus-visible {
+  outline: 2px solid oklch(var(--primary));
+  outline-offset: -2px;
+}
+
+/* ==================== MCP 配置面板 ==================== */
+.atp-config-intro {
+  padding: 12px;
+  font-size: 11px;
+  color: oklch(var(--text-muted));
+  line-height: 1.6;
+  border-bottom: 1px solid oklch(var(--border));
+}
+
+.atp-config-intro code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg-secondary));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+  color: oklch(var(--primary));
+}
+
+.atp-config-section {
+  border-bottom: 1px solid oklch(var(--border));
+}
+
+.atp-config-section:last-child {
+  border-bottom: none;
+}
+
+.atp-config-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: oklch(var(--text));
+  background: oklch(var(--bg-secondary) / 0.5);
+}
+
+.atp-config-detail {
+  padding: 8px 12px;
+}
+
+.atp-config-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 10px;
+  color: oklch(var(--text-muted));
+  line-height: 1.5;
+}
+
+.atp-step-num {
+  display: flex;
   align-items: center;
   justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: oklch(var(--primary) / 0.15);
+  color: oklch(var(--primary));
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.atp-config-step code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg-secondary));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: oklch(var(--text));
+}
+
+.atp-config-code {
+  margin-top: 6px;
+}
+
+.atp-config-code pre {
+  margin: 0;
+  padding: 8px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: oklch(var(--text));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg) / 0.8);
+  border: 1px solid oklch(var(--border));
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.atp-config-note {
+  padding: 6px 0;
+  font-size: 10px;
+  color: oklch(var(--text-muted));
+  line-height: 1.5;
+}
+
+.atp-config-note p {
+  margin: 0 0 4px 0;
+}
+
+.atp-config-note code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg-secondary));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  color: oklch(var(--text));
+}
+
+.atp-config-note pre {
+  margin: 4px 0 0 0;
+  padding: 6px 8px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: oklch(var(--text));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  background: oklch(var(--bg) / 0.8);
+  border: 1px solid oklch(var(--border));
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+/* ==================== 复制按钮行 ==================== */
+.atp-copy-row {
+  display: flex;
+  align-items: center;
   gap: 6px;
-  background: linear-gradient(135deg, oklch(0.6 0.18 250), oklch(0.52 0.22 250));
-  color: oklch(var(--primary-foreground));
-  border: none;
-  border-radius: 7px;
-  padding: 8px 0;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 650;
-  transition: all 0.15s;
-  letter-spacing: 0.01em;
-  box-shadow: 0 2px 8px oklch(0.55 0.2 250 / 0.2);
+  margin-top: 4px;
 }
 
-.ac-btn:hover {
-  transform: translateY(-0.5px);
-  box-shadow: 0 4px 14px oklch(0.55 0.2 250 / 0.3);
-}
-
-.ac-btn:active {
-  transform: translateY(0);
-}
-
-.ac-btn-secondary {
+.atp-path-value {
   flex: 1;
-  background: transparent;
-  color: oklch(var(--muted-foreground));
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 9px;
+  color: oklch(var(--primary));
+  background: oklch(var(--primary) / 0.08);
+  padding: 4px 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 1px solid oklch(var(--border));
-  border-radius: 7px;
-  padding: 7px 0;
+}
+
+.atp-copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid oklch(var(--border));
+  border-radius: 4px;
+  background: oklch(var(--bg-secondary));
   cursor: pointer;
-  font-size: 11.5px;
-  font-weight: 550;
-  transition: all 0.15s;
-}
-
-.ac-btn-secondary:hover {
-  background: oklch(var(--foreground) / 0.05);
-  color: oklch(var(--foreground));
-  border-color: oklch(var(--foreground) / 0.15);
-}
-
-.ac-response {
   font-size: 12px;
-  line-height: 1.55;
-  color: oklch(var(--foreground));
-  padding: 10px;
-  background: oklch(var(--background));
-  border-radius: 8px;
-  border: 1px solid oklch(var(--border));
-  max-height: 180px;
-  overflow-y: auto;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.atp-copy-btn:hover {
+  background: oklch(var(--primary) / 0.15);
+  border-color: oklch(var(--primary) / 0.3);
+}
+
+.atp-copy-btn:active {
+  transform: scale(0.95);
 }

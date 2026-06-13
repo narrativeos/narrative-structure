@@ -751,12 +751,17 @@ function App() {
                 </div>
               </div>
               <div className="sidebar-divider" />
-              <div className="sidebar-section">
-                <div className="sidebar-header">智能对话</div>
-                <div className="sidebar-content">
-                  <AgentConsole />
+                <div className="sidebar-section">
+                  <div className="sidebar-header">MCP 工具</div>
+                  <div className="sidebar-content">
+                    <AgentConsole
+                      projectPath={projectPath}
+                      projectName={projectName}
+                      blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)}
+                      onOpenProject={(path, name) => loadProject(path, name)}
+                    />
+                  </div>
                 </div>
-              </div>
             </div>
           </Group>
         </Panel>

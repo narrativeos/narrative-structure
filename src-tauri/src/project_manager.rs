@@ -709,6 +709,41 @@ pub fn get_project_path(state: tauri::State<'_, ProjectState>) -> Result<Option<
     Ok(path_guard.as_ref().map(|p| p.display().to_string()))
 }
 
+/// 获取 MCP 二进制路径（用于配置展示）
+#[tauri::command]
+pub fn get_mcp_binary_path() -> Result<String, String> {
+    // 返回当前可执行文件的兄弟目录中的 narrative-structure-mcp
+    let exe = std::env::current_exe()
+        .or_else(|_| std::env::current_dir().map(|p| p.join("target/debug/narrative-structure-mcp")));
+    match exe {
+        Ok(path) => {
+            let parent = path.parent().ok_or("无法获取父目录")?;
+            let mcp_path = parent.join("narrative-structure-mcp");
+            // 如果当前就是 narrative-structure-mcp，返回自身
+            if mcp_path.exists() {
+                Ok(mcp_path.display().to_string())
+            } else {
+                // 尝试同目录下的 release/debug 版本
+                let exe_name = path.file_name().map(|n| n.to_string_lossy().to_string());
+                match exe_name {
+                    Some(name) if name.contains("narrative-structure") => {
+                        // GUI 和 MCP 在同一目录
+                        let mcp = parent.join("narrative-structure-mcp");
+                        if mcp.exists() {
+                            Ok(mcp.display().to_string())
+                        } else {
+                            // 返回当前 exe 路径作为参考
+                            Ok(path.display().to_string())
+                        }
+                    }
+                    _ => Ok(path.display().to_string()),
+                }
+            }
+        }
+        Err(e) => Err(format!("无法获取可执行文件路径: {}", e)),
+    }
+}
+
 /// 列出项目 assets 目录下的所有文件
 #[tauri::command]
 pub fn list_project_files(
