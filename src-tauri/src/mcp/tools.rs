@@ -77,6 +77,63 @@ pub fn list_tools() -> Vec<Value> {
                 "properties": {}
             }
         }),
+        // --- PDF 翻页 ---
+        json!({
+            "name": "get_total_pages",
+            "description": "获取 PDF 文档的总页数",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "get_page_content",
+            "description": "获取指定 PDF 页的完整内容（该页所有语义块的文字内容拼接）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "PDF 页码（从 1 开始）"
+                    }
+                },
+                "required": ["page"]
+            }
+        }),
+        json!({
+            "name": "get_page_preview",
+            "description": "获取指定 PDF 页的内容预览（每个块只显示前 200 字符）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "PDF 页码（从 1 开始）"
+                    }
+                },
+                "required": ["page"]
+            }
+        }),
+        json!({
+            "name": "navigate_page",
+            "description": "翻页导航。返回指定页的内容预览，以及上一页/下一页的页码信息，方便外部智能体进行翻页浏览",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "page": {
+                        "type": "integer",
+                        "description": "当前页码（从 1 开始）"
+                    },
+                    "direction": {
+                        "type": "string",
+                        "description": "翻页方向：'next' 下一页, 'prev' 上一页, 'current' 只看当前页",
+                        "enum": ["next", "prev", "current"],
+                        "default": "current"
+                    }
+                },
+                "required": ["page"]
+            }
+        }),
         // --- 语义块操作 ---
         json!({
             "name": "get_blocks",
@@ -222,6 +279,12 @@ pub fn call_tool(name: &str, arguments: &Value, state: &McpState) -> Result<Vec<
         // --- 目录与结构 ---
         "get_toc" => tool_get_toc(arguments, state),
         "get_page_stats" => tool_get_page_stats(arguments, state),
+
+        // --- PDF 翻页 ---
+        "get_total_pages" => tool_get_total_pages(arguments, state),
+        "get_page_content" => tool_get_page_content(arguments, state),
+        "get_page_preview" => tool_get_page_preview(arguments, state),
+        "navigate_page" => tool_navigate_page(arguments, state),
 
         // --- 语义块操作 ---
         "get_blocks" => tool_get_blocks(arguments, state),
@@ -403,6 +466,237 @@ fn tool_get_page_stats(_args: &Value, state: &McpState) -> Result<Vec<Value>, St
     Ok(vec![json!({
         "type": "text",
         "text": format!("Page statistics: {} pages, {} total blocks\nDetails: {:?}", total_pages, total_blocks, stats)
+    })])
+}
+
+// ---------------------------------------------------------------------------
+// 工具实现：PDF 翻页
+// ---------------------------------------------------------------------------
+
+/// 获取 PDF 总页数
+fn tool_get_total_pages(_args: &Value, state: &McpState) -> Result<Vec<Value>, String> {
+    let conn = get_db_conn(state)?;
+    let total_pages: i32 = conn.query_row(
+        "SELECT MAX(CAST(json_extract(metadata, '$.page') AS INTEGER)) FROM blocks",
+        [],
+        |r| r.get(0)
+    ).unwrap_or(0);
+
+    Ok(vec![json!({
+        "type": "text",
+        "text": format!("Total pages: {}", total_pages)
+    })])
+}
+
+/// 获取指定页的完整内容
+fn tool_get_page_content(args: &Value, state: &McpState) -> Result<Vec<Value>, String> {
+    let page: i32 = args.get("page")
+        .and_then(|v| v.as_i64()).map(|v| v as i32)
+        .ok_or("Missing required parameter: page")?;
+
+    let conn = get_db_conn(state)?;
+    
+    // 获取该页所有块的内容，按 order_idx 排序拼接
+    let mut stmt = conn.prepare(
+        "SELECT content, block_type FROM blocks \
+         WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) = ?1 \
+         ORDER BY order_idx"
+    ).map_err(|e| e.to_string())?;
+
+    let contents: Vec<(String, String)> = stmt.query_map(rusqlite::params![page], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    let mut result = String::new();
+    for (content, block_type) in &contents {
+        match block_type.as_str() {
+            "heading" => {
+                result.push_str(&format!("\n# {}\n", content));
+            }
+            "paragraph" | "text" => {
+                result.push_str(&format!("{}\n", content));
+            }
+            "list_item" => {
+                result.push_str(&format!("- {}\n", content));
+            }
+            "table" => {
+                result.push_str(&format!("\n{}\n", content));
+            }
+            _ => {
+                result.push_str(&format!("{}\n", content));
+            }
+        }
+    }
+
+    if result.is_empty() {
+        return Ok(vec![json!({
+            "type": "text",
+            "text": format!("Page {} has no content blocks", page)
+        })]);
+    }
+
+    Ok(vec![json!({
+        "type": "text",
+        "text": format!("=== Page {} ===\n{}", page, result.trim())
+    })])
+}
+
+/// 获取指定页的内容预览（每个块只显示前 200 字符）
+fn tool_get_page_preview(args: &Value, state: &McpState) -> Result<Vec<Value>, String> {
+    let page: i32 = args.get("page")
+        .and_then(|v| v.as_i64()).map(|v| v as i32)
+        .ok_or("Missing required parameter: page")?;
+
+    let conn = get_db_conn(state)?;
+
+    let mut stmt = conn.prepare(
+        "SELECT block_type, substr(content, 1, 200) as preview FROM blocks \
+         WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) = ?1 \
+         ORDER BY order_idx"
+    ).map_err(|e| e.to_string())?;
+
+    let previews: Vec<(String, String)> = stmt.query_map(rusqlite::params![page], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    let mut result = String::new();
+    for (block_type, preview) in &previews {
+        let marker = match block_type.as_str() {
+            "heading" => "📑",
+            "paragraph" | "text" => "📝",
+            "list_item" => "🔹",
+            "table" => "📊",
+            "image" => "🖼️",
+            _ => "📄",
+        };
+        result.push_str(&format!("  {} {}\n", marker, preview));
+    }
+
+    if result.is_empty() {
+        return Ok(vec![json!({
+            "type": "text",
+            "text": format!("Page {} has no content blocks", page)
+        })]);
+    }
+
+    Ok(vec![json!({
+        "type": "text",
+        "text": format!("=== Page {} (preview) ===\n{}", page, result.trim())
+    })])
+}
+
+/// 翻页导航 - 返回当前页预览 + 上下页导航信息
+fn tool_navigate_page(args: &Value, state: &McpState) -> Result<Vec<Value>, String> {
+    let page: i32 = args.get("page")
+        .and_then(|v| v.as_i64()).map(|v| v as i32)
+        .ok_or("Missing required parameter: page")?;
+    let direction: String = args.get("direction")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "current".to_string());
+
+    // 获取总页数
+    let conn = get_db_conn(state)?;
+    let total_pages: i32 = conn.query_row(
+        "SELECT MAX(CAST(json_extract(metadata, '$.page') AS INTEGER)) FROM blocks",
+        [],
+        |r| r.get(0)
+    ).unwrap_or(0);
+
+    // 获取该页的预览
+    let mut stmt = conn.prepare(
+        "SELECT block_type, substr(content, 1, 200) as preview FROM blocks \
+         WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) = ?1 \
+         ORDER BY order_idx"
+    ).map_err(|e| e.to_string())?;
+
+    let previews: Vec<(String, String)> = stmt.query_map(rusqlite::params![page], |row| {
+        Ok((row.get(0)?, row.get(1)?))
+    }).map_err(|e| e.to_string())?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    let mut page_content = String::new();
+    for (block_type, preview) in &previews {
+        let marker = match block_type.as_str() {
+            "heading" => "📑",
+            "paragraph" | "text" => "📝",
+            "list_item" => "🔹",
+            "table" => "📊",
+            "image" => "🖼️",
+            _ => "📄",
+        };
+        page_content.push_str(&format!("  {} {}\n", marker, preview));
+    }
+
+    // 构建导航信息
+    let mut result = format!(
+        "📖 Page {}/{}\n",
+        page, total_pages
+    );
+
+    // 当前页内容
+    if page_content.is_empty() {
+        result.push_str("  (empty page)\n");
+    } else {
+        result.push_str(&page_content);
+    }
+
+    // 导航按钮
+    result.push('\n');
+    if page > 1 {
+        result.push_str(&format!("⬅️  Previous: Page {}\n", page - 1));
+    }
+    if page < total_pages {
+        result.push_str(&format!("➡️  Next: Page {}\n", page + 1));
+    }
+
+    // 如果是 next/prev 方向，也显示目标页的简要信息
+    match direction.as_str() {
+        "next" if page < total_pages => {
+            let next_page = page + 1;
+            let next_previews: Vec<(String, String)> = conn.prepare(
+                "SELECT block_type, substr(content, 1, 100) as preview FROM blocks \
+                 WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) = ?1 \
+                 ORDER BY order_idx LIMIT 3"
+            ).map_err(|e| e.to_string())?
+            .query_map(rusqlite::params![next_page], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+            result.push_str(&format!("\n--- Preview of Page {} ---\n", next_page));
+            for (bt, pv) in &next_previews {
+                result.push_str(&format!("  [{}] {}\n", bt, pv));
+            }
+        }
+        "prev" if page > 1 => {
+            let prev_page = page - 1;
+            let prev_previews: Vec<(String, String)> = conn.prepare(
+                "SELECT block_type, substr(content, 1, 100) as preview FROM blocks \
+                 WHERE CAST(json_extract(metadata, '$.page') AS INTEGER) = ?1 \
+                 ORDER BY order_idx LIMIT 3"
+            ).map_err(|e| e.to_string())?
+            .query_map(rusqlite::params![prev_page], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            }).map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+            result.push_str(&format!("\n--- Preview of Page {} ---\n", prev_page));
+            for (bt, pv) in &prev_previews {
+                result.push_str(&format!("  [{}] {}\n", bt, pv));
+            }
+        }
+        _ => {}
+    }
+
+    Ok(vec![json!({
+        "type": "text",
+        "text": result.trim().to_string()
     })])
 }
 
