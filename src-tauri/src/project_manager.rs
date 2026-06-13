@@ -685,6 +685,64 @@ pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// 截取当前窗口画面，返回 base64 编码的 PNG
+/// 使用 macOS screencapture 命令截取屏幕
+/// TODO: 未来可替换为 CoreGraphics FFI + image crate 实现纯 Rust 方案
+#[tauri::command]
+pub fn capture_window(_window: tauri::Window) -> Result<String, String> {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let output_path = format!("/tmp/narrative-screenshot-{}.png", timestamp);
+
+    let output = Command::new("screencapture")
+        .args(["-x", &output_path])
+        .output()
+        .map_err(|e| format!("screencapture not found: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("screencapture failed: {}", stderr));
+    }
+
+    let image_data = std::fs::read(&output_path)
+        .map_err(|e| format!("Failed to read screenshot: {}", e))?;
+
+    let base64 = base64_encode(&image_data);
+
+    Ok(base64)
+}
+
+/// 简单的 base64 编码
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    let chunks = data.chunks(3);
+    for chunk in chunks {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
 fn collect_matching_files(_base: &Path, dir: &Path, pattern: &str, out: &mut Option<String>) {
     if out.is_some() { return; }
     if let Ok(entries) = fs::read_dir(dir) {

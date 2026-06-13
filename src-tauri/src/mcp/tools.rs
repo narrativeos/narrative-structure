@@ -255,6 +255,20 @@ pub fn list_tools() -> Vec<Value> {
                 "required": ["pattern"]
             }
         }),
+        // --- 系统工具 ---
+        json!({
+            "name": "screenshot",
+            "description": "截取当前屏幕并返回 PNG 图片的 base64 编码。用于调试 GUI 显示效果，如确认 PDF 是否正确渲染。仅支持 macOS（使用 screencapture 命令）",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "output_path": {
+                        "type": "string",
+                        "description": "可选：截图保存的绝对路径。如果不指定，保存到 /tmp/narrative-screenshot-*.png"
+                    }
+                }
+            }
+        }),
     ]
 }
 
@@ -298,6 +312,9 @@ pub fn call_tool(name: &str, arguments: &Value, state: &McpState) -> Result<Vec<
         // --- 资源文件 ---
         "list_assets" => tool_list_assets(arguments, state),
         "find_asset" => tool_find_asset(arguments, state),
+
+        // --- 系统工具 ---
+        "screenshot" => tool_screenshot(arguments, state),
 
         _ => Err(format!("Unknown tool: {}", name)),
     }
@@ -913,6 +930,86 @@ fn find_matching_file(dir: &std::path::Path, pattern: &str, out: &mut Option<Str
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// 工具实现：系统工具
+// ---------------------------------------------------------------------------
+
+/// 截图工具 - 调用 macOS screencapture 截取屏幕
+fn tool_screenshot(args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    // 生成截图文件名
+    let output_path = args.get("output_path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("/tmp/narrative-screenshot-{}.png", timestamp)
+        });
+
+    // 确保目录存在
+    if let Some(parent) = std::path::Path::new(&output_path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create directory: {}", e))?;
+    }
+
+    // 调用 screencapture -x (不发出声音) -l (全屏)
+    let output = Command::new("screencapture")
+        .args(["-x", &output_path])
+        .output()
+        .map_err(|e| format!("Failed to execute screencapture: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("screencapture failed: {}", stderr));
+    }
+
+    // 读取图片文件并转为 base64
+    let image_data = std::fs::read(&output_path)
+        .map_err(|e| format!("Failed to read screenshot file: {}", e))?;
+
+    let base64 = base64_encode(&image_data);
+    let file_size = image_data.len();
+
+    Ok(vec![json!({
+        "type": "image",
+        "mimeType": "image/png",
+        "data": base64
+    }), json!({
+        "type": "text",
+        "text": format!("Screenshot saved to: {}\nFile size: {} bytes", output_path, file_size)
+    })])
+}
+
+/// 简单的 base64 编码（不依赖外部 crate）
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    let chunks = data.chunks(3);
+    for chunk in chunks {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }
 
 #[cfg(test)]
