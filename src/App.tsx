@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import html2canvas from "html2canvas";
 import {
   Panel,
   Group,
@@ -52,23 +51,37 @@ function countNodes(node: TocNode): number {
 // =========================================================================
 // 全局截图函数 — 供 MCP / 外部调用
 // =========================================================================
-// 使用 html2canvas 截取整个应用界面，保存为 PNG，返回 base64
+// 使用 dom-to-image-more 截取整个应用界面，保存为 PNG，返回 base64
 // 通过 window.screenshot() 调用，不依赖任何操作系统命令
+// dom-to-image-more 使用 SVG foreignObject，不会遇到 oklch 解析问题
 async function takeScreenshot(): Promise<string> {
   try {
-    const canvas = await html2canvas(document.body, {
-      useCORS: true,
-      backgroundColor: null,
-      scale: window.devicePixelRatio || 1,
+    // 动态导入 dom-to-image-more（避免影响主 bundle）
+    const domtoimage = await import('dom-to-image-more');
+    
+    // 使用 toBlob 方式（更高效）
+    const blob = await domtoimage.toBlob(document.body, {
+      height: document.body.scrollHeight,
+      width: document.body.scrollWidth,
     });
-    // 转为 base64 PNG
-    const dataUrl = canvas.toDataURL('image/png');
-    // 同时保存到本地文件（通过 Tauri write_file）
-    const base64 = dataUrl.split(',')[1];
+    
+    // 转为 base64
+    const reader = new FileReader();
+    const base64 = await new Promise<string>((resolve, reject) => {
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        // 去掉 "data:image/png;base64," 前缀
+        resolve(result.split(',')[1] || '');
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+    
     // 调用后端保存文件
     try {
       await invoke('save_screenshot', { base64 });
     } catch {}
+    
     return base64;
   } catch (e: any) {
     throw new Error(`截图失败: ${e.message}`);
