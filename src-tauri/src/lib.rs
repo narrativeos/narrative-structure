@@ -374,6 +374,7 @@ pub fn run() {
             project_manager::find_asset_file,
             project_manager::read_file_bytes,
             project_manager::capture_window,
+            project_manager::save_screenshot,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,

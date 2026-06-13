@@ -936,53 +936,16 @@ fn find_matching_file(dir: &std::path::Path, pattern: &str, out: &mut Option<Str
 // 工具实现：系统工具
 // ---------------------------------------------------------------------------
 
-/// 截图工具 - 调用 macOS screencapture 截取屏幕
-fn tool_screenshot(args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
-    use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    // 生成截图文件名
-    let output_path = args.get("output_path")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            format!("/tmp/narrative-screenshot-{}.png", timestamp)
-        });
-
-    // 确保目录存在
-    if let Some(parent) = std::path::Path::new(&output_path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create directory: {}", e))?;
-    }
-
-    // 调用 screencapture -x (不发出声音) -l (全屏)
-    let output = Command::new("screencapture")
-        .args(["-x", &output_path])
-        .output()
-        .map_err(|e| format!("Failed to execute screencapture: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("screencapture failed: {}", stderr));
-    }
-
-    // 读取图片文件并转为 base64
-    let image_data = std::fs::read(&output_path)
-        .map_err(|e| format!("Failed to read screenshot file: {}", e))?;
-
-    let base64 = base64_encode(&image_data);
-    let file_size = image_data.len();
-
+/// 截图工具 - 使用前端 html2canvas，不依赖系统命令
+/// MCP 独立进程无法直接访问前端窗口，返回使用说明
+fn tool_screenshot(_args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
     Ok(vec![json!({
-        "type": "image",
-        "mimeType": "image/png",
-        "data": base64
-    }), json!({
         "type": "text",
-        "text": format!("Screenshot saved to: {}\nFile size: {} bytes", output_path, file_size)
+        "text": "Screenshot via MCP standalone is not directly supported.\
+                 \n\nTo take a screenshot:\
+                 \n  1. In the Tauri app, call: window.screenshot() \
+                 \n  2. Or use the Tauri command: invoke('save_screenshot', { base64 })\
+                 \n\nThis uses html2canvas (pure JavaScript) and does not depend on any OS commands."
     })])
 }
 

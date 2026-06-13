@@ -685,36 +685,55 @@ pub fn read_file_bytes(path: String) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// 截取当前窗口画面，返回 base64 编码的 PNG
-/// 使用 macOS screencapture 命令截取屏幕
-/// TODO: 未来可替换为 CoreGraphics FFI + image crate 实现纯 Rust 方案
+/// 前端 html2canvas 截图后，将 base64 数据保存为 PNG 文件
+/// 完全不依赖操作系统命令，纯前端渲染截图
 #[tauri::command]
-pub fn capture_window(_window: tauri::Window) -> Result<String, String> {
-    use std::process::Command;
+pub fn save_screenshot(base64: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // 解码 base64
+    let image_data = base64_decode(&base64)
+        .map_err(|e| format!("Base64 解码失败: {}", e))?;
+
+    // 生成文件名
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     let output_path = format!("/tmp/narrative-screenshot-{}.png", timestamp);
 
-    let output = Command::new("screencapture")
-        .args(["-x", &output_path])
-        .output()
-        .map_err(|e| format!("screencapture not found: {}", e))?;
+    // 保存 PNG 文件
+    std::fs::write(&output_path, &image_data)
+        .map_err(|e| format!("保存截图失败: {}", e))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("screencapture failed: {}", stderr));
+    Ok(output_path)
+}
+
+/// 截取当前窗口画面（已废弃，使用前端 html2canvas 代替）
+/// 保留此接口向后兼容
+#[tauri::command]
+pub fn capture_window(_window: tauri::Window) -> Result<String, String> {
+    Ok("Please use frontend window.screenshot() instead. This command is deprecated.".to_string())
+}
+
+/// 简单的 base64 解码
+fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
+    const CHARS: [u8; 64] = *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = Vec::new();
+    let mut buf = 0u32;
+    let mut bits = 0;
+    for c in input.bytes() {
+        if c == b'=' { break; }
+        let val = CHARS.iter().position(|&x| x == c).ok_or(format!("Invalid base64 char: {}", c as char))? as u32;
+        buf = (buf << 6) | val;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            result.push((buf >> bits) as u8);
+            buf &= (1u32 << bits) - 1;
+        }
     }
-
-    let image_data = std::fs::read(&output_path)
-        .map_err(|e| format!("Failed to read screenshot: {}", e))?;
-
-    let base64 = base64_encode(&image_data);
-
-    Ok(base64)
+    Ok(result)
 }
 
 /// 简单的 base64 编码
