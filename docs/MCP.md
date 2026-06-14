@@ -79,6 +79,15 @@ echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_toc","
 | `get_toc` | 获取文档目录树 | 无 |
 | `get_page_stats` | 统计每页的语义块数量 | 无 |
 
+### PDF 翻页
+
+| 工具名 | 描述 | 参数 |
+|--------|------|------|
+| `get_total_pages` | 获取 PDF 总页数 | 无 |
+| `get_page_content` | 获取指定页完整内容 | `page: integer` |
+| `get_page_preview` | 获取指定页内容预览 | `page: integer` |
+| `navigate_page` | 翻页导航（含上下页信息） | `page`, `direction: next\|prev\|current` |
+
 ### 语义块操作
 
 | 工具名 | 描述 | 参数 |
@@ -100,6 +109,27 @@ echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"get_toc","
 |--------|------|------|
 | `list_assets` | 列出所有资源文件 | 无 |
 | `find_asset` | 搜索匹配的资源文件 | `pattern: string` |
+
+### Page Agent (GUI 驱动)
+
+> 通过 eval_queue 文件队列向运行中的 Tauri 应用注入 JavaScript，驱动 GUI 操作。
+> **需要 App 正在运行** (`npm run tauri dev`)
+
+| 工具名 | 描述 | 参数 |
+|--------|------|------|
+| `page_get_state` | 获取简化 DOM 状态（可交互元素索引化列表） | 无 |
+| `page_do_action` | 执行 click/fill/scroll/select/execute_js | `type`, `target?`, `value?` |
+| `page_screenshot` | 截取当前页面截图 (base64) | 无 |
+
+### 前端诊断 (通过 eval_queue)
+
+> 使用方法: `echo 'JS_CODE' > /tmp/narrative-eval-queue.txt`
+
+| 工具名 | 描述 | 用法 |
+|--------|------|------|
+| `get_page_text` | 获取页面可见文本 | `echo 'document.body.innerText.substring(0,5000)' > /tmp/narrative-eval-queue.txt` |
+| `get_page_html` | 获取页面 HTML | `echo 'document.body.outerHTML.substring(0,20000)' > /tmp/narrative-eval-queue.txt` |
+| `evaluate_js` | 执行任意 JS | `echo 'JS_CODE' > /tmp/narrative-eval-queue.txt` |
 
 ## 集成到 AI 框架
 

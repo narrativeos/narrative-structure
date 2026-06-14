@@ -709,13 +709,6 @@ pub fn save_screenshot(base64: String) -> Result<String, String> {
     Ok(output_path)
 }
 
-/// 截取当前窗口画面（已废弃，使用前端 html2canvas 代替）
-/// 保留此接口向后兼容
-#[tauri::command]
-pub fn capture_window(_window: tauri::Window) -> Result<String, String> {
-    Ok("Please use frontend window.screenshot() instead. This command is deprecated.".to_string())
-}
-
 /// 简单的 base64 解码
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     const CHARS: [u8; 64] = *b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -852,6 +845,38 @@ fn collect_files(_base: &Path, dir: &Path, out: &mut Vec<String>) {
             }
         }
     }
+}
+
+/// Agent Proxy v2 轮询：前端调用此命令读取命令队列
+/// 返回 JSON 命令字符串，或 "empty" 表示无命令
+/// 
+/// 架构：外部写入 JSON 到 /tmp/narrative-agent-queue.json
+/// 前端每 500ms 轮询此命令，在安全 JS 上下文中执行
+/// 结果通过 eval_result_read 写回 /tmp/narrative-eval-result.txt
+#[tauri::command]
+pub fn agent_poll_queue() -> Result<String, String> {
+    use std::fs;
+    let queue_path = "/tmp/narrative-agent-queue.json";
+    let content = fs::read_to_string(queue_path);
+    match content {
+        Ok(s) if !s.trim().is_empty() => {
+            // 原子性地读取并清空
+            fs::write(queue_path, "").ok();
+            Ok(s.trim().to_string())
+        }
+        _ => Ok("empty".to_string()),
+    }
+}
+
+/// Agent Proxy v2 结果返回：前端调用此命令将结果写入文件
+/// 供外部 Python/CLI/MCP 读取 /tmp/narrative-eval-result.txt
+#[tauri::command]
+pub fn eval_result_read(result: String) -> Result<String, String> {
+    use std::fs;
+    let result_path = "/tmp/narrative-eval-result.txt";
+    fs::write(result_path, &result)
+        .map_err(|e| format!("write error: {}", e))?;
+    Ok("written".to_string())
 }
 
 #[cfg(test)]

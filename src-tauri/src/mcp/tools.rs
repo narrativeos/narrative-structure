@@ -258,17 +258,18 @@ pub fn list_tools() -> Vec<Value> {
         // --- 系统工具 ---
         json!({
             "name": "screenshot",
-            "description": "截取当前应用界面。MCP 独立进程无法直接访问前端，请使用 Playwright MCP 的 playwright_screenshot 工具进行截图。",
+            "description": "截取当前应用界面。MCP 独立进程无法直接访问前端 GUI，请通过 eval_queue 调用 Tauri 的 capture_window 命令: echo 'window.__TAURI__.core.invoke(\"capture_window\")' > /tmp/narrative-eval-queue.txt",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
             }
         }),
         // --- 前端诊断工具 ---
-        // 这些工具提供使用说明，指导 AI agent 使用 Playwright MCP 观察前端状态
+        // 这些工具通过 eval_queue 文件队列向运行中的 Tauri 应用注入 JavaScript
+        // 使用方法: echo 'JS_CODE' > /tmp/narrative-eval-queue.txt
         json!({
             "name": "get_page_text",
-            "description": "获取当前页面所有可见文本内容。使用 Playwright MCP 的 playwright_get_visible_text 工具。用于快速了解当前显示了什么内容、哪个项目被打开、当前编辑区的内容等。",
+            "description": "获取当前页面所有可见文本内容。通过 eval_queue 注入 JS: echo 'document.body.innerText.substring(0,5000)' > /tmp/narrative-eval-queue.txt。用于快速了解当前显示了什么内容、哪个项目被打开等。需要 App 正在运行。",
             "inputSchema": {
                 "type": "object",
                 "properties": {}
@@ -276,7 +277,7 @@ pub fn list_tools() -> Vec<Value> {
         }),
         json!({
             "name": "get_page_html",
-            "description": "获取当前页面 HTML 结构。使用 Playwright MCP 的 playwright_get_visible_html 工具。用于详细分析 DOM 结构、组件状态、面板布局等。",
+            "description": "获取当前页面 HTML 结构。通过 eval_queue 注入 JS: echo 'document.body.outerHTML.substring(0,20000)' > /tmp/narrative-eval-queue.txt。用于详细分析 DOM 结构、组件状态等。需要 App 正在运行。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -294,7 +295,7 @@ pub fn list_tools() -> Vec<Value> {
         }),
         json!({
             "name": "get_console_logs",
-            "description": "获取浏览器控制台日志。使用 Playwright MCP 的 playwright_console_logs 工具。用于调试前端错误、查看项目加载进度。",
+            "description": "获取前端控制台日志。通过 eval_queue 执行诊断脚本: echo 'window.pageControllerBridge?.getState()' > /tmp/narrative-eval-queue.txt。需要 App 正在运行。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -313,16 +314,63 @@ pub fn list_tools() -> Vec<Value> {
         }),
         json!({
             "name": "evaluate_js",
-            "description": "在浏览器中执行任意 JavaScript 代码。使用 Playwright MCP 的 playwright_evaluate 工具。用于获取任意前端状态、检查变量值等。",
+            "description": "通过 eval_queue 在 Tauri 应用中执行 JavaScript。使用方法: echo 'JS_CODE' > /tmp/narrative-eval-queue.txt。用于获取任意前端状态、检查变量值等。需要 App 正在运行 (npm run tauri dev)。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "script": {
                         "type": "string",
-                        "description": "要执行的 JavaScript 代码"
+                        "description": "要执行的 JavaScript 代码，通过 echo '...' > /tmp/narrative-eval-queue.txt 注入"
                     }
                 },
                 "required": ["script"]
+            }
+        }),
+        // --- Page Agent 集成：GUI 驱动 ---
+        json!({
+            "name": "page_get_state",
+            "description": "获取当前页面的简化 DOM 状态（由 Page Agent 的 PageController 提供，不需要 LLM）。返回可交互元素的索引化列表，外部 Agent 可用这些索引调用 page_do_action 进行操作。返回格式: {url, title, header, content, footer} 其中 content 是简化 HTML，如 '[0]<button>Open</button>[1]<input placeholder=\"path\"/>'",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
+        }),
+        json!({
+            "name": "page_do_action",
+            "description": "对当前页面执行操作（由 Page Agent 的 PageController 提供，不需要 LLM）。操作类型: click(点击元素), fill(填写输入框), scroll(滚动), select(选择下拉选项), execute_js(执行 JS)。target 为元素索引（从 page_get_state 获取，如 \"0\", \"1\"）。例如: {type:\"click\", target:\"0\"} 点击索引0的元素",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "description": "操作类型: click, fill, scroll, select, execute_js"
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "元素索引（从 page_get_state 获取，如 \"0\", \"1\"）"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "fill 时填写的文本, select 时选择的选项, execute_js 时执行的脚本"
+                    },
+                    "scroll_down": {
+                        "type": "boolean",
+                        "description": "scroll 时是否向下滚动（默认 true）"
+                    },
+                    "pixels": {
+                        "type": "integer",
+                        "description": "scroll 时滚动的像素数"
+                    }
+                },
+                "required": ["type"]
+            }
+        }),
+        json!({
+            "name": "page_screenshot",
+            "description": "截取当前页面截图，返回 base64 编码的 PNG 图片。用于确认 page_do_action 操作后的页面状态。",
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
             }
         }),
     ]
@@ -371,6 +419,11 @@ pub fn call_tool(name: &str, arguments: &Value, state: &McpState) -> Result<Vec<
 
         // --- 系统工具 ---
         "screenshot" => tool_screenshot(arguments, state),
+
+        // --- Page Agent 集成 ---
+        "page_get_state" => tool_page_get_state(arguments, state),
+        "page_do_action" => tool_page_do_action(arguments, state),
+        "page_screenshot" => tool_page_screenshot(arguments, state),
 
         _ => Err(format!("Unknown tool: {}", name)),
     }
@@ -1003,6 +1056,128 @@ fn tool_screenshot(_args: &Value, _state: &McpState) -> Result<Vec<Value>, Strin
                  \n  2. Or use the Tauri command: invoke('save_screenshot', { base64 })\
                  \n\nThis uses html2canvas (pure JavaScript) and does not depend on any OS commands."
     })])
+}
+
+// ---------------------------------------------------------------------------
+// 工具实现：Page Agent 集成
+// ---------------------------------------------------------------------------
+
+/// 通过 eval-queue 在前端执行 JS，等待结果文件返回
+/// 
+/// 机制：
+/// 1. MCP 后端将 JS 写入 /tmp/narrative-eval-queue.txt
+/// 2. 前端 useEvalQueue 轮询 eval_js_queue → <script> 标签注入执行
+/// 3. 注入脚本通过 dispatchEvent('eval-result') 发送结果
+/// 4. 前端监听 eval-result 事件，调用 Tauri command 写结果文件
+/// 5. MCP 后端轮询读取结果文件
+/// 
+/// 注意：注入脚本不能直接调用 window.__TAURI__（Tauri v2 安全限制），
+/// 必须通过 CustomEvent 让前端处理。
+fn eval_js_and_wait(script: &str) -> Result<String, String> {
+    use std::fs;
+    use std::thread;
+    
+    let queue_path = "/tmp/narrative-eval-queue.txt";
+    let result_path = "/tmp/narrative-eval-result.txt";
+    
+    // Step 1: 清空旧结果
+    fs::write(result_path, "").ok();
+    
+    // Step 2: 包装脚本：执行后 dispatchEvent 发送结果
+    // 注入脚本通过 dispatchEvent 发送结果，前端监听并调用 Tauri command
+    let full_script = format!(
+        r#"(async()=>{{try{{const r=await({});window.dispatchEvent(new CustomEvent('eval-result',{{detail:r}}));}}catch(e){{window.dispatchEvent(new CustomEvent('eval-result',{{detail:{{error:e.message}}}}));}}}})()"#,
+        script
+    );
+    fs::write(queue_path, &full_script)
+        .map_err(|e| format!("Failed to write eval queue: {}", e))?;
+    
+    // Step 3: 等待前端消费（useEvalQueue 每 500ms 轮询）
+    for _ in 0..10 {
+        thread::sleep(std::time::Duration::from_millis(500));
+        if fs::metadata(queue_path).map(|m| m.len() == 0).unwrap_or(false) {
+            break; // 已被消费
+        }
+    }
+    
+    // Step 4: 等待结果文件（最多 5 秒）
+    for _ in 0..50 {
+        thread::sleep(std::time::Duration::from_millis(100));
+        if let Ok(content) = fs::read_to_string(result_path) {
+            if !content.trim().is_empty() {
+                return Ok(content.trim().to_string());
+            }
+        }
+    }
+    
+    Err("Timeout: frontend did not return Page Agent result. Make sure the Tauri app is running.".to_string())
+}
+
+/// page_get_state — 获取当前页面的简化 DOM 状态
+fn tool_page_get_state(_args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
+    let result = eval_js_and_wait(
+        r#"window.pageControllerBridge.getState()"#
+    )?;
+    
+    Ok(vec![json!({ "type": "text", "text": result })])
+}
+
+/// page_do_action — 对当前页面执行操作
+fn tool_page_do_action(args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
+    let action_type = args.get("type")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing required parameter: type")?;
+    
+    let target = args.get("target")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let value = args.get("value")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let scroll_down = args.get("scroll_down")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let pixels = args.get("pixels")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32);
+    
+    // 构建 JSON 参数
+    let mut json_parts = vec![format!("type:{}", action_type)];
+    if let Some(t) = &target {
+        json_parts.push(format!("target:{}", t));
+    }
+    if let Some(v) = &value {
+        json_parts.push(format!("value:{}", v));
+    }
+    if let Some(p) = &pixels {
+        json_parts.push(format!("pixels:{}", p));
+    }
+    
+    let action_json = format!(
+        r#"{{type:"{}",target:{},value:{},scrollDown:{},pixels:{}}}"#,
+        action_type,
+        target.map(|t| format!("\"{}\"", t)).unwrap_or("null".to_string()),
+        value.map(|v| format!("\"{}\"", v)).unwrap_or("null".to_string()),
+        scroll_down,
+        pixels.map(|p| p.to_string()).unwrap_or("null".to_string())
+    );
+    
+    let result = eval_js_and_wait(
+        &format!(r#"window.pageControllerBridge.doAction({})"#, action_json)
+    )?;
+    
+    Ok(vec![json!({ "type": "text", "text": result })])
+}
+
+/// page_screenshot — 截取当前页面截图
+fn tool_page_screenshot(_args: &Value, _state: &McpState) -> Result<Vec<Value>, String> {
+    // 使用前端 window.screenshot() 函数（html2canvas）
+    // 通过 dispatchEvent 发送结果
+    let result = eval_js_and_wait(
+        r#"window.screenshot()"#
+    )?;
+    
+    Ok(vec![json!({ "type": "text", "text": result })])
 }
 
 /// 简单的 base64 编码（不依赖外部 crate）

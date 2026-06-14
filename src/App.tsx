@@ -2,6 +2,13 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+// PageController Bridge — 初始化 Page Agent 的 DOM 操作能力（不需要 LLM）
+import "./lib/pageControllerBridge";
+// Agent Proxy — 通过 postMessage 与外部通信，绕过 Tauri 安全限制
+import { setupAgentProxy } from "./lib/agentProxy";
+
+// Agent Proxy v2: 前端主动轮询 agent_poll_queue，在安全上下文中执行命令
+// 不再需要 useEvalQueue - setupAgentProxy 内部处理轮询
 import {
   Panel,
   Group,
@@ -147,6 +154,8 @@ function App() {
   const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
   const [pageInput, setPageInput] = useState("");
 
+  // Agent Proxy v2: setupAgentProxy 内部处理轮询，无需 useEvalQueue
+  
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
     setMirrorBboxes([]); setLines([]); setPageRect(null);
@@ -551,6 +560,20 @@ function App() {
       } catch {}
     }
   }, [fillPageWindow]);
+
+  // 暴露到全局 window，供外部 Agent 通过 eval_queue 调用
+  useEffect(() => {
+    (window as any).nsOpenProject = (path: string, name?: string) => loadProject(path, name);
+    (window as any).nsCloseProject = () => handleCloseProject();
+    (window as any).nsNavigateToPage = (page: number) => handlePageChange(page);
+    (window as any).nsGetProjectPath = () => projectPath;
+    (window as any).nsGetProjectName = () => projectName;
+  }, [loadProject, handleCloseProject, handlePageChange, projectPath, projectName]);
+
+  // 初始化 Agent Proxy (postMessage 通信)
+  useEffect(() => {
+    setupAgentProxy();
+  }, []);
 
   // BlockEditor 和 MarkdownPreview 直接使用 pageBlocks（完整窗口）
   // 缓冲区命中逻辑（中间5页）仅在 handlePageChange 中用于判断是否重载

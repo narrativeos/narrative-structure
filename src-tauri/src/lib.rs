@@ -362,8 +362,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol("narrativestructure", asset_protocol)
         .manage(ProjectState::new())
+        .setup(|_app| {
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            // project_manager
+            // Agent Proxy v2: 前端主动轮询
+            project_manager::agent_poll_queue,
+            project_manager::eval_result_read,
             project_manager::import_new_project,
             project_manager::open_project,
             project_manager::close_project,
@@ -373,7 +378,6 @@ pub fn run() {
             project_manager::list_project_files,
             project_manager::find_asset_file,
             project_manager::read_file_bytes,
-            project_manager::capture_window,
             project_manager::save_screenshot,
             // db_engine
             db_engine::get_toc,
