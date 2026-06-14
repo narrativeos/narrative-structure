@@ -32,7 +32,7 @@ body{{margin:0;background:#525659;overflow:hidden}}
 #curr-area{{flex:0 0 auto;width:100%;display:flex;align-items:center;justify-content:center}}
 #next-area{{flex:1;width:100%;display:flex;align-items:flex-start;justify-content:center;overflow:hidden}}
 .page-wrap{{position:relative;display:block;width:100%;max-width:100%;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
-.page-wrap canvas{{display:block;width:100%;height:auto}}
+.page-wrap canvas{{display:block;margin:0 auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
@@ -220,7 +220,7 @@ window.addEventListener("resize",function(){{
 clearTimeout(resizeTimer);
 resizeTimer=setTimeout(function(){{
 if(!pdfDoc)return;
-var nw=Math.min(window.innerWidth-40,pageWidth||nw);
+var nw=window.innerWidth-40;
 if(nw!==pageWidth){{
 pageWidth=nw;
 pdf.getPage(1).then(function(p){{
@@ -237,7 +237,7 @@ pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
   pdfDoc=pdf;totalPages=pdf.numPages;
   pdf.getPage(1).then(function(p){{
     var v=p.getViewport({{scale:1}});
-    pageWidth=Math.min(v.width,window.innerWidth-40);
+    pageWidth=window.innerWidth-40;
     pageHeight=v.height*(pageWidth/v.width);
     showPage(1);
   }});
