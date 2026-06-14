@@ -164,13 +164,9 @@ function createPageWrap(num){{
 var wrap=document.createElement('div');
 wrap.className='page-wrap';wrap.id='page-'+num;
 var c=document.createElement('canvas');
-c.width=pageWidth;c.height=pageHeight;
-c.style.width=pageWidth+'px';c.style.height=pageHeight+'px';
 wrap.appendChild(c);
 var ov=document.createElement('canvas');
-ov.className='overlay';ov.width=pageWidth;ov.height=pageHeight;
-ov.style.width=pageWidth+'px';ov.style.height=pageHeight+'px';
-wrap.appendChild(ov);
+ov.className='overlay';wrap.appendChild(ov);
 var badge=document.createElement('div');
 badge.className='page-num';badge.textContent='p'+num;wrap.appendChild(badge);
 return wrap;
@@ -179,16 +175,18 @@ return wrap;
 function renderPage(num){{
 if(!pdfDoc||num<1||num>totalPages)return;
 pdfDoc.getPage(num).then(function(page){{
-var viewport=page.getViewport({{scale:pageWidth/page.getViewport({{scale:1}}).width}});
+var v1=page.getViewport({{scale:1}});
+var scale=pageWidth/v1.width;
+var viewport=page.getViewport({{scale:scale}});
 var wrap=renderedPages[num];
 if(!wrap){{wrap=createPageWrap(num);renderedPages[num]=wrap;}}
 var c=wrap.querySelector('canvas:not(.overlay)');
-c.width=pageWidth;c.height=pageHeight;
-c.style.width=pageWidth+'px';c.style.height=pageHeight+'px';
+c.width=viewport.width;c.height=viewport.height;
+c.style.width=viewport.width+'px';c.style.height=viewport.height+'px';
 page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
 var ov=wrap.querySelector('.overlay');
-ov.width=pageWidth;ov.height=pageHeight;
-ov.style.width=pageWidth+'px';ov.style.height=pageHeight+'px';
+ov.width=viewport.width;ov.height=viewport.height;
+ov.style.width=viewport.width+'px';ov.style.height=viewport.height+'px';
 drawOverlay(ov,num);
 }});
 }}
