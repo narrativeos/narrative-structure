@@ -27,17 +27,17 @@ body{{margin:0;background:#525659;overflow:hidden}}
 #toolbar{{position:fixed;top:4px;left:8px;z-index:100;display:flex;gap:6px;align-items:center}}
 #toolbar button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer}}
 #toolbar button.active{{background:rgba(59,130,246,0.6);color:#fff;border-color:rgba(59,130,246,0.8)}}
-#stage{{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}}
+#stage{{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center}}
 #prev-area{{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}}
 #curr-area{{flex:0 0 auto;width:100%;display:flex;align-items:center;justify-content:center}}
 #next-area{{flex:1;width:100%;display:flex;align-items:flex-start;justify-content:center;overflow:hidden}}
 .page-wrap{{position:relative;display:block;width:100%;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
-.page-wrap canvas{{display:block;width:100%;height:auto}}
+.page-wrap canvas{{display:block}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
 #nav-btns{{position:fixed;right:8px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;z-index:100}}
-#nav-btns button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:8px 6px;font-size:14px;cursor:pointer;pointer-events:auto}}
+#nav-btns button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:8px 6px;font-size:14px;cursor:pointer}}
 #nav-btns button:hover{{background:rgba(59,130,246,0.6)}}
 .leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
 </style></head><body>
@@ -164,9 +164,13 @@ function createPageWrap(num){{
 var wrap=document.createElement('div');
 wrap.className='page-wrap';wrap.id='page-'+num;
 var c=document.createElement('canvas');
-c.width=pageWidth;c.height=pageHeight;wrap.appendChild(c);
+c.width=pageWidth;c.height=pageHeight;
+c.style.width=pageWidth+'px';c.style.height=pageHeight+'px';
+wrap.appendChild(c);
 var ov=document.createElement('canvas');
-ov.className='overlay';ov.width=pageWidth;ov.height=pageHeight;wrap.appendChild(ov);
+ov.className='overlay';ov.width=pageWidth;ov.height=pageHeight;
+ov.style.width=pageWidth+'px';ov.style.height=pageHeight+'px';
+wrap.appendChild(ov);
 var badge=document.createElement('div');
 badge.className='page-num';badge.textContent='p'+num;wrap.appendChild(badge);
 return wrap;
@@ -180,9 +184,11 @@ var wrap=renderedPages[num];
 if(!wrap){{wrap=createPageWrap(num);renderedPages[num]=wrap;}}
 var c=wrap.querySelector('canvas:not(.overlay)');
 c.width=pageWidth;c.height=pageHeight;
+c.style.width=pageWidth+'px';c.style.height=pageHeight+'px';
 page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
 var ov=wrap.querySelector('.overlay');
 ov.width=pageWidth;ov.height=pageHeight;
+ov.style.width=pageWidth+'px';ov.style.height=pageHeight+'px';
 drawOverlay(ov,num);
 }});
 }}
