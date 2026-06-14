@@ -29,7 +29,7 @@ body{{margin:0;background:#525659;overflow:hidden}}
 #toolbar button.active{{background:rgba(59,130,246,0.6);color:#fff;border-color:rgba(59,130,246,0.8)}}
 #stage{{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}}
 #prev-area{{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}}
-#curr-area{{width:100%;display:flex;align-items:center;justify-content:center}}
+#curr-area{{flex:0 0 auto;width:100%;display:flex;align-items:center;justify-content:center}}
 #next-area{{flex:1;width:100%;display:flex;align-items:flex-start;justify-content:center;overflow:hidden}}
 .page-wrap{{position:relative;display:block;width:100%;max-width:100%;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
 .page-wrap canvas{{display:block;width:100%;height:auto}}
