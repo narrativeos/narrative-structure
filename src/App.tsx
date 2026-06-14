@@ -103,7 +103,6 @@ function App() {
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
   const pageReqIdRef = useRef(0);
-  const loadedCenterRef = useRef(0); // 已加载数据的中心页码
   const pageBlocksRef = useRef<Block[] | null>(null);
   const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
   const [pageInput, setPageInput] = useState("");
@@ -124,87 +123,152 @@ function App() {
     requestBboxRef.current?.();
   }, [pageBlocks]);
 
-  // 接收 bbox-pos → mirror 层 + 飞线；接收 scroll-offset → mirror 滚动
-  useEffect(() => {
-    const drawAllLines = () => {
-      const wsRect = workspaceRef.current?.getBoundingClientRect();
-      if (!wsRect) return;
-      const typeColor: Record<string, [string, string]> = {
-        heading: ['#ef4444', '#dc2626'],
-        text: ['#3b82f6', '#60a5fa'],
-        interline_equation: ['#10b981', '#34d399'],
-        table: ['#f59e0b', '#fbbf24'],
-        image: ['#8b5cf6', '#a78bfa'],
-        empty: ['#6b7280', '#9ca3af'],
+    // 接收 bbox-pos → mirror 层 + 飞线；接收 scroll-offset → mirror 滚动
+    useEffect(() => {
+      const drawAllLines = () => {
+        const wsRect = workspaceRef.current?.getBoundingClientRect();
+        if (!wsRect) return;
+        const typeColor: Record<string, [string, string]> = {
+          heading: ['#ef4444', '#dc2626'],
+          text: ['#3b82f6', '#60a5fa'],
+          interline_equation: ['#10b981', '#34d399'],
+          table: ['#f59e0b', '#fbbf24'],
+          image: ['#8b5cf6', '#a78bfa'],
+          empty: ['#6b7280', '#9ca3af'],
+        };
+        const newLines: LineDef[] = [];
+        let prevType = '', alt = false;
+        const currentPage = currentPageRef.current;
+        // 只绘制当前页的飞线 — 过滤 block 属于当前页的元素
+        document.querySelectorAll('[data-block-id]').forEach(el => {
+          const id = el.getAttribute('data-block-id')!;
+          // 检查该 block 是否属于当前页
+          let blockPage = 0;
+          try {
+            const blockData = (window as any).__flyRowMap?.[id];
+            if (blockData?.page) blockPage = blockData.page;
+          } catch {}
+          if (blockPage !== currentPage) return;
+          const mirrorEl = document.querySelector(`[data-mirror-id="${id}"]`);
+          if (!mirrorEl) return;
+          const r1 = el.getBoundingClientRect();
+          const r2 = mirrorEl.getBoundingClientRect();
+          let btype = 'text';
+          el.classList.forEach(c => { if (typeColor[c]) btype = c; });
+          if (btype === prevType) { alt = !alt; } else { alt = false; prevType = btype; }
+          const colors = typeColor[btype] || ['#fbbf24', '#fcd34d'];
+          newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + 6 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: colors[alt ? 1 : 0], active: true });
+        });
+        setLines(newLines);
       };
-      const newLines: LineDef[] = [];
-      let prevType = '', alt = false;
-      document.querySelectorAll('[data-block-id]').forEach(el => {
-        const id = el.getAttribute('data-block-id')!;
-        const mirrorEl = document.querySelector(`[data-mirror-id="${id}"]`);
-        if (!mirrorEl) return;
-        const r1 = el.getBoundingClientRect();
-        const r2 = mirrorEl.getBoundingClientRect();
-        let btype = 'text';
-        el.classList.forEach(c => { if (typeColor[c]) btype = c; });
-        if (btype === prevType) { alt = !alt; } else { alt = false; prevType = btype; }
-        const colors = typeColor[btype] || ['#fbbf24', '#fcd34d'];
-        newLines.push({ id: `line-${id}`, x1: r1.left - wsRect.left, y1: r1.top + 6 - wsRect.top, x2: r2.left + r2.width - wsRect.left, y2: r2.top + r2.height/2 - wsRect.top, color: colors[alt ? 1 : 0], active: true });
-      });
-      setLines(newLines);
-    };
-    drawLinesRef.current = drawAllLines;
-    // 提取当前页文本 → 请求 bbox
-    const requestBboxForCurrentPage = () => {
-      const blocks = pageBlocksRef.current;
-      if (!blocks?.length) return;
-      const iframe = pdfIframeRef.current?.contentWindow;
-      if (!iframe) return;
-      const page = currentPageRef.current;
-      const pageTexts = blocks
-        .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
-        .filter(b => b.block_type !== 'empty' && b.content.trim())
-        .map(b => b.content);
-      pageTextsRef.current = pageTexts;
-      if (!pageTexts.length) return;
-      const reqId = ++bboxRequestIdRef.current;
-      (window as any).__flyRows = blocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
-      (window as any).__flyReqId = reqId;
-      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
-    };
-    requestBboxRef.current = requestBboxForCurrentPage;
-    let rafId = 0;
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === 'pdf-scroll-offset') {
-        cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
-        // 滚动时也刷新 bbox 位置（debounce 150ms）
-        const iframeWin = pdfIframeRef.current?.contentWindow;
-        if (iframeWin) {
-          clearTimeout(scrollBboxTimerRef.current);
-          const reqId = ++bboxRequestIdRef.current;
-          scrollBboxTimerRef.current = setTimeout(() => {
-            const texts = pageTextsRef.current;
-            if (!texts.length) return;
-            (window as any).__flyReqId = reqId;
-            iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
-          }, 150);
+      drawLinesRef.current = drawAllLines;
+      // 从三页（page-1, page, page+1）获取 blocks 数据 → 请求 bbox
+      const requestBboxForVisiblePages = () => {
+        const blocks = pageBlocksRef.current;
+        if (!blocks?.length) return;
+        const iframe = pdfIframeRef.current?.contentWindow;
+        if (!iframe) return;
+        const page = currentPageRef.current;
+        // 过滤三页的 blocks: page-1, page, page+1
+        const threePageBlocks = blocks.filter(b => {
+          try {
+            const bpage = JSON.parse(b.metadata||'{}').page||0;
+            return bpage >= page - 1 && bpage <= page + 1;
+          } catch { return false; }
+        });
+        // 按页码分组，向 iframe 发送三页的 get-bbox-pos 请求
+        const pageMap = new Map<number, Block[]>();
+        threePageBlocks.forEach(b => {
+          try {
+            const bpage = JSON.parse(b.metadata||'{}').page||0;
+            if (bpage > 0 && b.block_type !== 'empty' && b.content.trim()) {
+              if (!pageMap.has(bpage)) pageMap.set(bpage, []);
+              pageMap.get(bpage)!.push(b);
+            }
+          } catch {}
+        });
+        // 当前页的 texts 用于飞线匹配
+        const currentPageBlocks = pageMap.get(page) || [];
+        const pageTexts = currentPageBlocks.map(b => b.content);
+        pageTextsRef.current = pageTexts;
+        // 构建 flyRowMap — 只包含当前页的 block（用于飞线绘制过滤）
+        const flyRowMap: Record<string, { id: string, content: string, page: number }> = {};
+        currentPageBlocks.forEach(b => {
+          flyRowMap[b.id] = { id: b.id, content: b.content, page };
+        });
+        (window as any).__flyRowMap = flyRowMap;
+        // 收集三页的所有 bboxes 用于 mirror 层渲染
+        const allBboxesPromise: Promise<MirrorBbox[]>[] = [];
+        const reqId = ++bboxRequestIdRef.current;
+        (window as any).__flyReqId = reqId;
+        // 对每一页发送请求
+        pageMap.forEach((pageBlocks, p) => {
+          const texts = pageBlocks.map(b => b.content);
+          if (texts.length > 0) {
+            // 构建该页的 flyRows
+            const pageFlyRows = pageBlocks.map(b => ({ id: b.id, content: b.content, page: p }));
+            allBboxesPromise.push(
+              new Promise<MirrorBbox[]>((resolve) => {
+                const oneTimeHandler = (e: MessageEvent) => {
+                  if (e.data?.type === 'bbox-pos' && e.data.page === p) {
+                    const bboxes = (e.data.bboxes || []).map((bb: any, bi: number) => ({
+                      x: bb.x, y: bb.y, w: bb.w, h: bb.h,
+                      id: pageFlyRows[bi]?.id || ""
+                    })).filter((bb: MirrorBbox) => bb.id);
+                    window.removeEventListener('message', oneTimeHandler);
+                    resolve(bboxes);
+                  }
+                };
+                window.addEventListener('message', oneTimeHandler);
+                iframe.postMessage({ type: "get-bbox-pos", page: p, texts }, "*");
+              })
+            );
+          }
+        });
+        // 等待所有页的 bbox 结果汇总
+        if (allBboxesPromise.length > 0) {
+          Promise.all(allBboxesPromise).then(allBboxes => {
+            if (reqId === bboxRequestIdRef.current) {
+              const flatBboxes = allBboxes.flat();
+              setMirrorBboxes(flatBboxes);
+              requestAnimationFrame(drawAllLines);
+            }
+          });
+        } else if (pageTexts.length > 0) {
+          // 只有当前页有内容
+          (window as any).__flyRows = currentPageBlocks.map(b => ({ id: b.id, content: b.content }));
+          iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
         }
-        return;
-      }
-      // iframe 内 👁 按钮 → 同步父窗口 🏷️ 状态
-      if (e.data?.type === 'overlay-toggled') {
-        setShowAnnotations(e.data.visible);
-        return;
-      }
-      const reqId = (window as any).__flyReqId;
-      if (reqId !== undefined && reqId !== bboxRequestIdRef.current) return;
-      if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
-      const rows: any[] = (window as any).__flyRows || [];
-      const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id);
-      if (e.data.pageRect) setPageRect(e.data.pageRect);
-      setMirrorBboxes(bboxes);
-      requestAnimationFrame(drawAllLines);
-    };
+      };
+      requestBboxRef.current = requestBboxForVisiblePages;
+      let rafId = 0;
+      const handler = (e: MessageEvent) => {
+        if (e.data?.type === 'pdf-scroll-offset') {
+          cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
+          // 滚动时也刷新 bbox 位置（debounce 150ms）— 重新请求三页
+          clearTimeout(scrollBboxTimerRef.current);
+          scrollBboxTimerRef.current = setTimeout(() => {
+            requestBboxRef.current?.();
+          }, 150);
+          return;
+        }
+        // iframe 内 👁 按钮 → 同步父窗口 🏷️ 状态
+        if (e.data?.type === 'overlay-toggled') {
+          setShowAnnotations(e.data.visible);
+          return;
+        }
+        // bbox-pos 响应 — 已由 requestBboxForVisiblePages 中的 Promise 处理
+        // 但保留向后兼容：处理单次请求的情况
+        const reqId = (window as any).__flyReqId;
+        if (reqId !== undefined && reqId !== bboxRequestIdRef.current) return;
+        if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
+        const flyRowMap = (window as any).__flyRowMap || {};
+        const rows: any[] = Object.values(flyRowMap);
+        const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id);
+        if (e.data.pageRect) setPageRect(e.data.page);
+        setMirrorBboxes(bboxes);
+        requestAnimationFrame(drawAllLines);
+      };
     window.addEventListener('message', handler);
     let scrollEl: Element | null = null;
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
@@ -488,26 +552,12 @@ function App() {
     }
   }, [startImportProgressHeartbeat, stopImportProgressHeartbeat]);
 
-  // PDF 翻页：缓冲区策略 — 中间5页直接用，超出则重载21页
+  // PDF 翻页：每次直接根据当前PDF页码加载三页（page-1, page, page+1）
   const handlePageChange = useCallback(async (page: number) => {
-    const center = loadedCenterRef.current;
-    // 缓冲区命中：当前页在已加载数据的中间5页内 → 只更新引用 + 滚动定位 + 刷新 bbox
-    if (center > 0 && pageBlocksRef.current && page >= center - 3 && page <= center + 3) {
-      currentPageRef.current = page;
-      setDisplayPage(page);
-      setMirrorBboxes([]); setLines([]); setPageRect(null);
-      requestBboxRef.current?.();
-      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 命中缓冲区 (center=p${center})`]);
-      requestAnimationFrame(() => {
-        document.querySelector('.page-group-active')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      });
-      return;
-    }
-    // 缓冲区未命中或无数据 → 重新加载
     const reqId = ++pageReqIdRef.current;
     try {
-      const pageStart = Math.max(1, page - 4);
-      const pageEnd = pageStart + 8; // 9 页窗口（当前 ±4）
+      const pageStart = Math.max(1, page - 1);
+      const pageEnd = page + 1; // 3 页窗口（当前 ±1）
       const blocks = await invoke<Block[]>("get_blocks_by_page", { pageStart, pageEnd });
       if (reqId !== pageReqIdRef.current) return;
       const loadedPages = new Set<number>();
@@ -517,9 +567,8 @@ function App() {
           if (p > 0) loadedPages.add(p);
         } catch {}
       }
-      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}（9页窗口），实际 ${loadedPages.size} 页/${blocks.length} 行`]);
+      setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}（3页窗口），实际 ${loadedPages.size} 页/${blocks.length} 行`]);
       const filledBlocks = fillPageWindow(blocks, pageStart, pageEnd);
-      loadedCenterRef.current = page;
       currentPageRef.current = page;
       setDisplayPage(page);
       pageBlocksRef.current = filledBlocks;
@@ -530,7 +579,6 @@ function App() {
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
         if (reqId !== pageReqIdRef.current) return;
-        loadedCenterRef.current = page;
         currentPageRef.current = page;
         setDisplayPage(page);
         if (blocks.length > 0) {
@@ -542,7 +590,6 @@ function App() {
   }, [fillPageWindow]);
 
   // BlockEditor 和 MarkdownPreview 直接使用 pageBlocks（完整窗口）
-  // 缓冲区命中逻辑（中间5页）仅在 handlePageChange 中用于判断是否重载
   const handleSelectBlock = useCallback(async (nodeId: string) => {
     try {
       const blocks = await invoke<Block[]>("get_block_chunk", { id: nodeId });
