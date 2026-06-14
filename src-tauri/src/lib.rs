@@ -23,25 +23,27 @@ fn asset_protocol(
     // 如果是 .pdf 请求，返回内嵌 PDF.js 连续查看器
     if path.extension().map(|e| e == "pdf").unwrap_or(false) && !uri.contains("raw=1") {
         let html = format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-body{{margin:0;background:#525659}}
+body{{margin:0;background:#525659;overflow:hidden}}
 #toolbar{{position:fixed;top:4px;left:8px;z-index:100;display:flex;gap:6px;align-items:center}}
 #toolbar button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer}}
 #toolbar button.active{{background:rgba(59,130,246,0.6);color:#fff;border-color:rgba(59,130,246,0.8)}}
-#viewer{{padding:28px 0 8px 0;width:100%}}
-.page-wrap{{position:relative;display:block;margin:0 auto 4px auto;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
+#stage{{position:fixed;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}}
+#prev-area{{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;overflow:hidden}}
+#curr-area{{flex:0 0 auto;width:100%;display:flex;align-items:center;justify-content:center}}
+#next-area{{flex:1;width:100%;display:flex;align-items:flex-start;justify-content:center;overflow:hidden}}
+.page-wrap{{position:relative;display:block;width:100%;box-sizing:border-box;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
 .page-wrap canvas{{display:block;width:100%;height:auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
+#nav-btns{{position:fixed;right:8px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;z-index:100}}
+#nav-btns button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:8px 6px;font-size:14px;cursor:pointer;pointer-events:auto}}
+#nav-btns button:hover{{background:rgba(59,130,246,0.6)}}
 .leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
-/* 布局模式 - 通过 body class 切换 */
-.layout-double-v #viewer{{display:flex;flex-direction:column;align-items:center;gap:16px;padding:0!important}}
 </style></head><body>
 <div id="indicator">1 / ?</div>
 <div id="toolbar" style="display:flex;align-items:center;gap:4px">
   <button id="btn-overlay" class="active" onclick="toggleOverlay()" title="显示/隐藏信息层">👁</button>
-  <button id="btn-single" class="active" onclick="setLayout('single')" title="单页">📄</button>
-  <button id="btn-double-v" onclick="setLayout('double-v')" title="双页竖排">📑</button>
   <span style="font-size:10px;color:#999;white-space:nowrap">
     <span class="leg-dot" style="background:#ef4444"></span>标题
     <span class="leg-dot" style="background:#3b82f6"></span>正文
@@ -50,11 +52,19 @@ body{{margin:0;background:#525659}}
     <span class="leg-dot" style="background:#8b5cf6"></span>图片
   </span>
 </div>
-<div id="viewer"></div>
+<div id="stage">
+  <div id="prev-area"></div>
+  <div id="curr-area"></div>
+  <div id="next-area"></div>
+</div>
+<div id="nav-btns">
+  <button onclick="prevPage()" title="上一页">⬆</button>
+  <button onclick="nextPage()" title="下一页">⬇</button>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-let pdfDoc=null,currentPage=0,autoScrolling=false,lastWidth=0,renderTimer=null;
+let pdfDoc=null,currentPage=1,totalPages=0;
 let middleData=null,overlayVisible=true,colorMap={{
   title:'transparent',text:'transparent',
   interline_equation:'transparent',table:'transparent',
@@ -65,20 +75,8 @@ let borderMap={{
   table:'#f59e0b',image:'#8b5cf6'
 }};
 let highlightedTexts=null;
-var currentLayout='single';
-function setLayout(layout){{
-document.body.classList.remove('layout-double-v');
-if(layout==='double-v'){{document.body.classList.add('layout-double-v');}}
-currentLayout=layout;
-// 更新按钮状态
-['btn-single','btn-double-v'].forEach(function(id){{
-document.getElementById(id).classList.remove('active');
-}});
-var btnId='btn-'+layout;
-if(btnId){{document.getElementById(btnId).classList.add('active');}}
-if(pdfDoc)renderAllPages(pdfDoc,true);
-window.parent.postMessage({{type:'layout-changed',layout:layout}},'*');
-}}
+var renderedPages={{}};
+var pageWidth=0,pageHeight=0;
 
 // 三字符组 Jaccard 相似度 (0~1)
 function trigramSim(a,b){{
@@ -97,11 +95,11 @@ function toggleOverlay(){{
   var btn=document.getElementById('btn-overlay');
   if(overlayVisible){{btn.classList.add('active');}}
   else{{btn.classList.remove('active');}}
-  if(pdfDoc)renderAllPages(pdfDoc,true);
+  renderPage(currentPage);
   window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
 }}
 
-function drawOverlay(canvas,pageNum,viewportScale){{
+function drawOverlay(canvas,pageNum){{
   if(!middleData||!overlayVisible)return;
   var page=middleData[pageNum-1];
   if(!page||!page.para_blocks)return;
@@ -150,161 +148,122 @@ ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
 }}
 }}
 
-function reRenderOverlay(){{
-if(!middleData)return;
-var wraps=document.querySelectorAll('.page-wrap');
-for(var wi=0;wi<wraps.length;wi++){{
-var w=wraps[wi],ov=w.querySelector('.overlay');
-if(!ov)continue;
-var pn=parseInt(w.id.replace('page-',''));
-var pg=middleData[pn-1];
-if(!pg||!pg.page_size)continue;
-var s=ov.width/pg.page_size[0];
-var ctx=ov.getContext('2d');
-ctx.clearRect(0,0,ov.width,ov.height);
-drawOverlay(ov,pn,s);
-}}
-}}
+
 
 pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
-pdfDoc=pdf;
-document.getElementById('indicator').textContent='1 / '+pdf.numPages;
-renderAllPages(pdf);setTimeout(function(){{detectCurrentPage();}},500);
+pdfDoc=pdf;totalPages=pdf.numPages;
+pdf.getPage(1).then(function(p){{
+var v=p.getViewport({{scale:1}});
+pageWidth=window.innerWidth-40;
+pageHeight=v.height*(pageWidth/v.width);
+showPage(1);
 }});
-function scrollToPage(num){{
-autoScrolling=true;
-var el=document.getElementById('page-'+num);
-if(el){{el.scrollIntoView({{behavior:'smooth',block:'start'}});}}
-else{{window.scrollTo(0,0);}}
-setTimeout(function(){{autoScrolling=false;}},1000);
-}}
-// 一次性渲染：CSS width:100% 负责后续所有缩放，不再因 resize 重渲
-function renderAllPages(pdf,isReflow){{
-var viewer=document.getElementById('viewer');
-var containerWidth=viewer.clientWidth-16;
-lastWidth=containerWidth;
-renderedWidth=containerWidth;
-var existing={{}};
-if(isReflow){{
-viewer.querySelectorAll('.page-wrap').forEach(function(w){{
-existing[parseInt(w.id.replace('page-',''))]=w;
+document.getElementById('indicator').textContent='1 / '+totalPages;
 }});
-for(var pn in existing){{
-if(parseInt(pn)>pdf.numPages){{existing[pn].remove();delete existing[pn];}}
-}}
-}}else{{
-viewer.innerHTML='';
-}}
-for(var i=1;i<=pdf.numPages;i++){{
-(function(num){{
-var wrap=existing[num];
-if(wrap){{
-// reflow: 只当基准宽度变化导致 canvas 尺寸不匹配时才重绘
-pdf.getPage(num).then(function(page){{
-var scale=containerWidth/page.getViewport({{scale:1}}).width;
-var viewport=page.getViewport({{scale:scale}});
-var c=wrap.querySelector('canvas:not(.overlay)');
-if(c&&(c.width!==viewport.width||c.height!==viewport.height)){{
-c.width=viewport.width;c.height=viewport.height;
-page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
-}}
-var ov=wrap.querySelector('.overlay');
-if(ov&&(ov.width!==viewport.width||ov.height!==viewport.height)){{
-ov.width=viewport.width;ov.height=viewport.height;
-drawOverlay(ov,num,scale);
-}}
-}});
-}}else{{
-pdf.getPage(num).then(function(page){{
-var scale=containerWidth/page.getViewport({{scale:1}}).width;
-var viewport=page.getViewport({{scale:scale}});
+function createPageWrap(num){{
 var wrap=document.createElement('div');
-wrap.className='page-wrap';
-wrap.id='page-'+num;
+wrap.className='page-wrap';wrap.id='page-'+num;
 var c=document.createElement('canvas');
-c.width=viewport.width;c.height=viewport.height;
-wrap.appendChild(c);
-page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
+c.width=pageWidth;c.height=pageHeight;wrap.appendChild(c);
 var ov=document.createElement('canvas');
-ov.className='overlay';
-ov.width=viewport.width;ov.height=viewport.height;
-wrap.appendChild(ov);
-drawOverlay(ov,num,scale);
+ov.className='overlay';ov.width=pageWidth;ov.height=pageHeight;wrap.appendChild(ov);
 var badge=document.createElement('div');
-badge.className='page-num';
-badge.textContent='p'+num;
-wrap.appendChild(badge);
-viewer.appendChild(wrap);
+badge.className='page-num';badge.textContent='p'+num;wrap.appendChild(badge);
+return wrap;
+}}
+
+function renderPage(num){{
+if(!pdfDoc||num<1||num>totalPages)return;
+pdfDoc.getPage(num).then(function(page){{
+var viewport=page.getViewport({{scale:pageWidth/page.getViewport({{scale:1}}).width}});
+var wrap=renderedPages[num];
+if(!wrap){{wrap=createPageWrap(num);renderedPages[num]=wrap;}}
+var c=wrap.querySelector('canvas:not(.overlay)');
+c.width=pageWidth;c.height=pageHeight;
+page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
+var ov=wrap.querySelector('.overlay');
+ov.width=pageWidth;ov.height=pageHeight;
+drawOverlay(ov,num);
 }});
 }}
-}})(i);
+
+function showPage(num){{
+if(num<1)num=1;if(num>totalPages)num=totalPages;
+currentPage=num;
+document.getElementById('indicator').textContent=num+' / '+totalPages;
+var prevArea=document.getElementById('prev-area');
+prevArea.innerHTML='';
+if(num>1){{
+if(!renderedPages[num-1]){{renderPage(num-1);}}
+setTimeout(function(){{if(renderedPages[num-1])prevArea.appendChild(renderedPages[num-1]);}},100);
 }}
+var currArea=document.getElementById('curr-area');
+currArea.innerHTML='';
+if(!renderedPages[num]){{renderPage(num);}}
+setTimeout(function(){{if(renderedPages[num])currArea.appendChild(renderedPages[num]);}},100);
+var nextArea=document.getElementById('next-area');
+nextArea.innerHTML='';
+if(num<totalPages){{
+if(!renderedPages[num+1]){{renderPage(num+1);}}
+setTimeout(function(){{if(renderedPages[num+1])nextArea.appendChild(renderedPages[num+1]);}},100);
 }}
-// 智能 resize：仅当容器变宽超 20% 才重渲提升清晰度，缩小/微调用 CSS width:100% 即时缩放
-var renderedWidth=0;
-if(window.ResizeObserver){{
-new ResizeObserver(function(entries){{
-var w=entries[0].contentRect.width-16;
-if(w>renderedWidth*1.1&&renderedWidth>0&&pdfDoc){{
-clearTimeout(renderTimer);
-renderTimer=setTimeout(function(){{renderAllPages(pdfDoc,true);}},500);
+window.parent.postMessage({{type:'pdf-page',page:num}},'*');
 }}
-}}).observe(document.getElementById('viewer'));
-}}
-function detectCurrentPage(){{
-var pages=document.querySelectorAll('.page-wrap');
-var best=null, bestDist=Infinity;
-var vh=window.innerHeight;
-pages.forEach(function(el){{
-var rect=el.getBoundingClientRect();
-// 找第一个顶部在视口内的页面（top >= 0 且 top < vh/2）
-var inView=(rect.top>=0&&rect.top<vh*0.5)||(rect.top<=0&&rect.bottom>vh*0.1);
-if(inView&&(rect.top<bestDist||bestDist===Infinity)){{bestDist=rect.top;best=el;}}
+
+function prevPage(){{if(currentPage>1)showPage(currentPage-1);}}
+function nextPage(){{if(currentPage<totalPages)showPage(currentPage+1);}}
+
+// 键盘翻页
+window.addEventListener('keydown',function(e){{
+if(e.key==='ArrowDown'||e.key==='PageDown'||e.key===' '){{e.preventDefault();nextPage();}}
+if(e.key==='ArrowUp'||e.key==='PageUp'){{e.preventDefault();prevPage();}}
+if(e.key==='Home'){{e.preventDefault();showPage(1);}}
+if(e.key==='End'){{e.preventDefault();showPage(totalPages);}}
 }});
-if(best){{
-var id=best.id;
-if(id&&id.startsWith('page-')){{
-var p=parseInt(id.replace('page-',''));
-if(p!==currentPage){{
-currentPage=p;
-document.getElementById('indicator').textContent=p+' / '+(pdfDoc?pdfDoc.numPages:'?');
-window.parent.postMessage({{type:'pdf-page',page:p}},'*');
+
+// 鼠标滚轮翻页
+var wheelTimer=null;
+window.addEventListener('wheel',function(e){{
+e.preventDefault();
+clearTimeout(wheelTimer);
+wheelTimer=setTimeout(function(){{
+if(e.deltaY>30)nextPage();else if(e.deltaY<-30)prevPage();
+}},80);
+}},{{passive:false}});
+
+// 窗口 resize 时重新计算宽度并重新渲染
+var resizeTimer=null;
+window.addEventListener("resize",function(){{
+clearTimeout(resizeTimer);
+resizeTimer=setTimeout(function(){{
+if(!pdfDoc)return;
+var nw=window.innerWidth-40;
+if(nw!==pageWidth){{
+pageWidth=nw;
+pdf.getPage(1).then(function(p){{
+pageHeight=p.getViewport({{scale:1}}).height*(pageWidth/p.getViewport({{scale:1}}).width);
+}});
+Object.keys(renderedPages).forEach(function(k){{renderedPages[k].remove();delete renderedPages[k];}});
+showPage(currentPage);
 }}
-}}
-}}
-}}
-var scrollTimer=null;
-window.addEventListener('scroll',function(){{
-window.parent.postMessage({{type:'pdf-scroll-offset',scrollY:window.scrollY,page:currentPage}},'*');
-clearTimeout(scrollTimer);
-scrollTimer=setTimeout(detectCurrentPage,100);
-}},{{passive:true}});
+}},200);
+}});
 window.addEventListener('message',function(e){{
-if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
+if(e.data&&e.data.type==='navigate')showPage(e.data.page);
 if(e.data&&e.data.type==='middle-data'){{
-middleData=e.data.data;
-if(pdfDoc)renderAllPages(pdfDoc,true);
+middleData=e.data.data;renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='highlight-bbox'){{
-highlightedTexts=e.data.texts||null;
-reRenderOverlay();
+highlightedTexts=e.data.texts||null;renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='clear-highlight'){{
-highlightedTexts=null;
-reRenderOverlay();
+highlightedTexts=null;renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='set-overlay'){{
 overlayVisible=!!e.data.visible;
 var btn=document.getElementById('btn-overlay');
-if(overlayVisible){{btn.classList.add('active');}}
-else{{btn.classList.remove('active');}}
-if(pdfDoc)renderAllPages(pdfDoc,true);
-}}
-if(e.data&&e.data.type==='set-layout'){{
-var body=document.body;
-body.classList.remove('layout-double-v');
-if(e.data.layout==='double-v'){{body.classList.add('layout-double-v');}}
-if(pdfDoc)renderAllPages(pdfDoc,true);
+if(overlayVisible){{btn.classList.add('active');}}else{{btn.classList.remove('active');}}
+renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='get-bbox-pos'){{
 var pgEl=document.getElementById('page-'+e.data.page);
