@@ -20,7 +20,7 @@ fn asset_protocol(
     let decoded = percent_encoding::percent_decode_str(path_str).decode_utf8_lossy();
     let path = std::path::PathBuf::from(decoded.as_ref());
 
-    // 如果是 .pdf 请求，返回内嵌 PDF.js 查看器 (支持单页/双页布局切换)
+    // 如果是 .pdf 请求，返回内嵌 PDF.js 连续查看器
     if path.extension().map(|e| e == "pdf").unwrap_or(false) && !uri.contains("raw=1") {
         let html = format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{{margin:0;background:#525659}}
@@ -34,23 +34,10 @@ body{{margin:0;background:#525659}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
 .leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
-/* 布局模式 - 默认单页 */
-#page-container{{}}
-/* 双页横排 */
-.layout-double-h #page-container{{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:16px;
-  max-width:100%;
-}}
-.layout-double-h #page-container>.page-wrap{{margin:0!important}}
-/* 双页竖排 */
-.layout-double-v #page-container{{
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-  gap:16px;
-}}
+/* 布局模式 - 通过 body class 切换 */
+.layout-double-h #viewer{{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0!important}}
+.layout-double-h #viewer>.page-wrap{{margin:0!important}}
+.layout-double-v #viewer{{display:flex;flex-direction:column;align-items:center;gap:16px;padding:0!important}}
 </style></head><body>
 <div id="indicator">1 / ?</div>
 <div id="toolbar" style="display:flex;align-items:center;gap:4px">
@@ -63,16 +50,21 @@ body{{margin:0;background:#525659}}
     <span class="leg-dot" style="background:#8b5cf6"></span>图片
   </span>
 </div>
-<div id="viewer"><div id="page-container"></div></div>
+<div id="viewer"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 let pdfDoc=null,currentPage=0,autoScrolling=false,lastWidth=0,renderTimer=null;
-let middleData=null,overlayVisible=true;
-let colorMap={{title:'transparent',text:'transparent',interline_equation:'transparent',table:'transparent',image:'transparent'}};
-let borderMap={{title:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',table:'#f59e0b',image:'#8b5cf6'}};
+let middleData=null,overlayVisible=true,colorMap={{
+  title:'transparent',text:'transparent',
+  interline_equation:'transparent',table:'transparent',
+  image:'transparent'
+}};
+let borderMap={{
+  title:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',
+  table:'#f59e0b',image:'#8b5cf6'
+}};
 let highlightedTexts=null;
-var currentLayout='single';
 
 // 三字符组 Jaccard 相似度 (0~1)
 function trigramSim(a,b){{
@@ -81,7 +73,8 @@ var sa=new Set(),sb=new Set(),i;
 for(i=0;i+3<=a.length;i++)sa.add(a.substring(i,i+3));
 for(i=0;i+3<=b.length;i++)sb.add(b.substring(i,i+3));
 if(sa.size===0||sb.size===0)return 0;
-var inter=0;sa.forEach(function(v){{if(sb.has(v))inter++;}});
+var inter=0;
+sa.forEach(function(v){{if(sb.has(v))inter++;}});
 return inter/(sa.size+sb.size-inter);
 }}
 
@@ -108,7 +101,11 @@ function drawOverlay(canvas,pageNum,viewportScale){{
     var stroke=borderMap[b.type]||'#888';
     ctx.fillStyle=fill;ctx.strokeStyle=stroke;ctx.lineWidth=0.5;
     ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
-    if(w>40&&h>12){{ctx.fillStyle=stroke;ctx.font='9px sans-serif';ctx.fillText(b.type,x+2,y+11);}}
+    // 小标签
+    if(w>40&&h>12){{
+      ctx.fillStyle=stroke;ctx.font='9px sans-serif';
+      ctx.fillText(b.type,x+2,y+11);
+    }}
   }});
   drawHighlight(ctx,page,sx,sy,pageNum);
 }}
@@ -130,8 +127,13 @@ sb=s.bbox||[0,0,0,0];
 hx=sb[0]*sx;hy=sb[1]*sy;hw=(sb[2]-sb[0])*sx;hh=(sb[3]-sb[1])*sy;
 ctx.strokeStyle='#fbbf24';ctx.lineWidth=2.5;
 ctx.strokeRect(hx-1,hy-1,hw+2,hh+2);
-ctx.fillStyle='rgba(251,191,36,0.25)';ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
-}}}}}}}}
+ctx.fillStyle='rgba(251,191,36,0.25)';
+ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
+}}
+}}
+}}
+}}
+}}
 }}
 
 function reRenderOverlay(){{
@@ -177,12 +179,13 @@ for(var pn in existing){{
 if(parseInt(pn)>pdf.numPages){{existing[pn].remove();delete existing[pn];}}
 }}
 }}else{{
-viewer.querySelector('#page-container').innerHTML='';
+viewer.innerHTML='';
 }}
 for(var i=1;i<=pdf.numPages;i++){{
 (function(num){{
 var wrap=existing[num];
 if(wrap){{
+// reflow: 只当基准宽度变化导致 canvas 尺寸不匹配时才重绘
 pdf.getPage(num).then(function(page){{
 var scale=containerWidth/page.getViewport({{scale:1}}).width;
 var viewport=page.getViewport({{scale:scale}});
@@ -217,12 +220,13 @@ var badge=document.createElement('div');
 badge.className='page-num';
 badge.textContent='p'+num;
 wrap.appendChild(badge);
-document.getElementById('page-container').appendChild(wrap);
+viewer.appendChild(wrap);
 }});
 }}
 }})(i);
 }}
 }}
+// 智能 resize：仅当容器变宽超 20% 才重渲提升清晰度，缩小/微调用 CSS width:100% 即时缩放
 var renderedWidth=0;
 if(window.ResizeObserver){{
 new ResizeObserver(function(entries){{
@@ -239,6 +243,7 @@ var best=null, bestDist=Infinity;
 var vh=window.innerHeight;
 pages.forEach(function(el){{
 var rect=el.getBoundingClientRect();
+// 找第一个顶部在视口内的页面（top >= 0 且 top < vh/2）
 var inView=(rect.top>=0&&rect.top<vh*0.5)||(rect.top<=0&&rect.bottom>vh*0.1);
 if(inView&&(rect.top<bestDist||bestDist===Infinity)){{bestDist=rect.top;best=el;}}
 }});
@@ -282,21 +287,10 @@ else{{btn.classList.remove('active');}}
 if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
 if(e.data&&e.data.type==='set-layout'){{
-var newLayout=e.data.layout||'single';
-var container=document.getElementById('page-container');
-var parent=container.parentElement;
-parent.className='layout-'+newLayout;
-currentLayout=newLayout;
-if(newLayout==='single'){{
-// 单页模式：恢复原有布局
-container.style.display='';
-}}else if(newLayout==='double-h'){{
-// 双页横排：需要重新组织页面到 grid
-// 保持页面在 container 中，CSS grid 自动处理
-}}else if(newLayout==='double-v'){{
-// 双页竖排：flex column
-}}
-// 重新渲染以适配新布局尺寸
+var body=document.body;
+body.classList.remove('layout-double-h','layout-double-v');
+if(e.data.layout==='double-h'){{body.classList.add('layout-double-h');}}
+else if(e.data.layout==='double-v'){{body.classList.add('layout-double-v');}}
 if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
 if(e.data&&e.data.type==='get-bbox-pos'){{
@@ -306,6 +300,7 @@ var pd=middleData[e.data.page-1];
 if(!pd||!pd.page_size)return;
 var pr=pgEl.getBoundingClientRect();
 var pw=pd.page_size[0],ph=pd.page_size[1];
+// 收集页内所有 span: {{text, bbox, idx}}
 var allSpans=[],bi,li,si;
 for(bi=0;bi<(pd.para_blocks||[]).length;bi++){{
 var pb=pd.para_blocks[bi];
@@ -314,8 +309,12 @@ var l=pb.lines[li];
 for(si=0;si<(l.spans||[]).length;si++){{
 var sp=l.spans[si];
 allSpans.push({{t:(sp.content||'').replace(/\\s+/g,''),b:sp.bbox||[0,0,0,0]}});
-}}}}}}
-var results=[],texts=e.data.texts||[];
+}}
+}}
+}}
+// 最大相似度匹配: 对每个 target text，找页内相似度最高的 span
+var results=[];
+var texts=e.data.texts||[];
 var used=Array(allSpans.length).fill(false);
 for(var ti=0;ti<texts.length;ti++){{
 var tc=texts[ti].replace(/\\s+/g,'');
@@ -325,6 +324,7 @@ for(var ai=0;ai<allSpans.length;ai++){{
 if(used[ai])continue;
 var sc=allSpans[ai].t;
 if(sc.length<3)continue;
+// 三字符组 Jaccard 相似度
 var score=trigramSim(tc,sc);
 if(score>bestScore){{bestScore=score;bestIdx=ai;}}
 }}
@@ -332,7 +332,8 @@ if(bestIdx>=0){{
 used[bestIdx]=true;
 var b=allSpans[bestIdx].b;
 results.push({{x:b[0]/pw*pr.width+pr.left,y:b[1]/ph*pr.height+pr.top,w:(b[2]-b[0])/pw*pr.width,h:(b[3]-b[1])/ph*pr.height}});
-}}}}
+}}
+}}
 window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.left,top:pr.top,width:pr.width,height:pr.height}},ifrScrollY:window.scrollY,ifrInnerH:window.innerHeight,bboxes:results}},'*');
 }}
 }});
