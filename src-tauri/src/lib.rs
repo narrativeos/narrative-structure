@@ -42,6 +42,9 @@ body{{margin:0;background:#525659}}
 <div id="indicator">1 / ?</div>
 <div id="toolbar" style="display:flex;align-items:center;gap:4px">
   <button id="btn-overlay" class="active" onclick="toggleOverlay()" title="显示/隐藏信息层">👁</button>
+  <button id="btn-single" class="active" onclick="setLayout('single')" title="单页">📄</button>
+  <button id="btn-double-h" onclick="setLayout('double-h')" title="双页横排">📖</button>
+  <button id="btn-double-v" onclick="setLayout('double-v')" title="双页竖排">📑</button>
   <span style="font-size:10px;color:#999;white-space:nowrap">
     <span class="leg-dot" style="background:#ef4444"></span>标题
     <span class="leg-dot" style="background:#3b82f6"></span>正文
@@ -65,6 +68,21 @@ let borderMap={{
   table:'#f59e0b',image:'#8b5cf6'
 }};
 let highlightedTexts=null;
+var currentLayout='single';
+function setLayout(layout){{
+document.body.classList.remove('layout-double-h','layout-double-v');
+if(layout==='double-h'){{document.body.classList.add('layout-double-h');}}
+else if(layout==='double-v'){{document.body.classList.add('layout-double-v');}}
+currentLayout=layout;
+// 更新按钮状态
+['btn-single','btn-double-h','btn-double-v'].forEach(function(id){{
+document.getElementById(id).classList.remove('active');
+}});
+var btnId='btn-'+layout;
+if(btnId){{document.getElementById(btnId).classList.add('active');}}
+if(pdfDoc)renderAllPages(pdfDoc,true);
+window.parent.postMessage({{type:'layout-changed',layout:layout}},'*');
+}}
 
 // 三字符组 Jaccard 相似度 (0~1)
 function trigramSim(a,b){{
