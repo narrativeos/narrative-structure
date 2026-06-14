@@ -270,9 +270,19 @@ function App() {
         requestAnimationFrame(drawAllLines);
       };
     window.addEventListener('message', handler);
+    // Blocks 区域滚动 → 动态重绘飞线端点
     let scrollEl: Element | null = null;
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
-    const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
+    const timer = setInterval(() => {
+      if (!scrollEl) {
+        // ScrollArea 的滚动容器是 .scroll-area-viewport 下的直接子元素
+        const viewport = document.querySelector('[class*="scroll-area"] [style*="overflow"]') || document.querySelector('.page-blocks-scroll > div') || document.querySelector('.page-blocks-list');
+        if (viewport) {
+          scrollEl = viewport;
+          scrollEl.addEventListener('scroll', onBlockScroll, { passive: true });
+        }
+      }
+    }, 500);
     return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
   }, []);
 
