@@ -81,8 +81,9 @@ fn dirs_next() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(PathBuf::from)
 }
 
-/// 生成日期格式的 ID: YYYY-MM-DD[_序号]（同一天重复创建时加 _2/_3 后缀）
-fn date_id() -> String {
+/// 生成项目 ID: YYYY-MM-DD-Name（日期前缀保证排序，名称来自 zip 文件名）
+/// 同名时加 _2/_3 后缀
+fn make_project_id(project_name: &str) -> String {
     use std::time::SystemTime;
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -90,9 +91,22 @@ fn date_id() -> String {
         .as_secs();
     let days = secs / 86400;
     let (y, m, d) = days_to_ymd(days as i64);
-    let base = format!("{:04}-{:02}-{:02}", y, m, d);
+    let date_prefix = format!("{:04}-{:02}-{:02}", y, m, d);
 
-    // 检查是否已有同一天的项目，自动加后缀
+    // 清理项目名称：只保留 Unicode 字母（含中文）、数字、连字符、下划线
+    let safe_name: String = project_name
+        .chars()
+        .filter(|c| c.is_alphabetic() || c.is_ascii_digit() || *c == '-' || *c == '_' || c.is_ascii_whitespace())
+        .map(|c| if c.is_ascii_whitespace() { '_' } else { c })
+        .collect();
+
+    let base = if safe_name.is_empty() {
+        date_prefix.clone()
+    } else {
+        format!("{}-{}", date_prefix, safe_name)
+    };
+
+    // 检查是否已有同名项目，自动加 _2/_3 后缀
     let projects_dir = project_root_dir().join("Projects");
     if projects_dir.is_dir() {
         let mut seq = 1u32;
@@ -101,11 +115,15 @@ fn date_id() -> String {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name == base && seq == 1 {
                     seq = 2;
-                } else if name.starts_with(&base) {
+                } else if name.starts_with(&format!("{}_{}", base, 1)) {
                     // 提取后缀数字
-                    let rest = &name[base.len()..];
-                    if rest.starts_with('_') {
-                        if let Ok(n) = rest[1..].parse::<u32>() {
+                    let rest = name.strip_prefix(&format!("{}_{}", base, 1)).unwrap_or("");
+                    if rest.is_empty() {
+                        seq = seq.max(2);
+                    }
+                } else if let Some(suffix) = name.strip_prefix(&base) {
+                    if suffix.starts_with('_') {
+                        if let Ok(n) = suffix[1..].parse::<u32>() {
                             seq = seq.max(n + 1);
                         }
                     }
@@ -211,8 +229,8 @@ fn import_new_project_blocking(
     let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
     page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0), None);
 
-    // 项目文件夹 = <project_root>/Projects/<date_id>/
-    let project_id = date_id();
+    // 项目文件夹 = <project_root>/Projects/YYYY-MM-DD-Name/
+    let project_id = make_project_id(project_name);
     let project_dir = project_root_dir().join("Projects").join(&project_id);
     let log_path = project_dir.join("import.log");
     page_mapper::emit_log(&app_handle, &format!("[import] 项目目录: {}", project_dir.display()), Some(&log_path));
