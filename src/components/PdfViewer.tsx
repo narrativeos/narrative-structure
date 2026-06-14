@@ -39,8 +39,8 @@ const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
       invoke<string | null>("find_asset_file", { pattern: "_middle.json" }),
     ]).then(([pdfPath, middlePath]) => {
       if (pdfPath) {
-        // URL 携带布局参数
-        setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(pdfPath)}?layout=${layout}&page=${targetPage}&t=${Date.now()}`);
+        // URL 携带布局参数 (不需要 encode，Rust 端会处理)
+        setPdfUrl(`narrativestructure://localhost/${pdfPath}?layout=${layout}&page=${targetPage}&t=${Date.now()}`);
       }
       // 存储 middle.json 路径，等 iframe 加载后发送
       if (middlePath) {
