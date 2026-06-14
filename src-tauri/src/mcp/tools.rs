@@ -1180,6 +1180,7 @@ fn tool_page_screenshot(_args: &Value, _state: &McpState) -> Result<Vec<Value>, 
     Ok(vec![json!({ "type": "text", "text": result })])
 }
 
+#[allow(dead_code)]
 /// 简单的 base64 编码（不依赖外部 crate）
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

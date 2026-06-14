@@ -729,6 +729,7 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     Ok(result)
 }
 
+#[allow(dead_code)]
 /// 简单的 base64 编码
 fn base64_encode(data: &[u8]) -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
