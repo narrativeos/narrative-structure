@@ -18,7 +18,7 @@ import BlockEditor from "./components/Editor";
 import type { MirrorBbox } from "./components/PdfMirrorLayer";
 import MarkdownPreview from "./components/MarkdownPreview";
 import FileExplorer from "./components/FileExplorer";
-import PdfViewer, { PdfLayout } from "./components/PdfViewer";
+import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
 import LogPanel from "./components/LogPanel";
@@ -102,7 +102,6 @@ function App() {
   const requestBboxRef = useRef<() => void>();
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
-  const [pdfLayout, setPdfLayout] = useState<PdfLayout>("single");
   const pageReqIdRef = useRef(0);
   const loadedCenterRef = useRef(0); // 已加载数据的中心页码
   const pageBlocksRef = useRef<Block[] | null>(null);
@@ -685,11 +684,6 @@ function App() {
         <div className="topbar-actions">
           <button className={`btn-sm${showAnnotations ? ' active' : ''}`} onClick={() => { setShowAnnotations(!showAnnotations); if (showAnnotations) setShowFlyLines(false); }} title="区块标注">🏷️ 标注</button>
           <button className={`btn-sm${showFlyLines ? ' active' : ''}`} onClick={() => setShowFlyLines(!showFlyLines)} disabled={!showAnnotations} title="飞线连">🔗 飞线</button>
-          <span className="layout-group">
-            <button className={`btn-sm${pdfLayout === 'single' ? ' active' : ''}`} onClick={() => setPdfLayout('single')} title="单页显示">📄</button>
-            <button className={`btn-sm${pdfLayout === 'double-h' ? ' active' : ''}`} onClick={() => setPdfLayout('double-h')} title="双页横排">📖</button>
-            <button className={`btn-sm${pdfLayout === 'double-v' ? ' active' : ''}`} onClick={() => setPdfLayout('double-v')} title="双页竖排">📑</button>
-          </span>
           <input
             className="page-jump-input"
             type="number" min="1"
@@ -747,17 +741,7 @@ function App() {
                   <div className="workspace-pane">
                     <div className="workspace-pane-header">PDF 视图</div>
                     <div className="workspace-pane-body">
-                      <PdfViewer
-                        ref={pdfIframeRef}
-                        key={projectKey}
-                        projectPath={projectPath}
-                        layout={pdfLayout}
-                        targetPage={currentPageRef.current}
-                        onPageChange={handlePageChange}
-                        mirrorBboxes={mirrorBboxes}
-                        pageRect={pageRect}
-                        showAnnotations={showAnnotations}
-                      />
+                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
                     </div>
                   </div>
                 </div>

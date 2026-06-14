@@ -300,14 +300,6 @@
 
   .btn-sm:disabled { @apply opacity-35 cursor-not-allowed; transform: none; box-shadow: none; }
 
-  .layout-group {
-    display: inline-flex;
-    gap: 2px;
-    padding: 2px;
-    border-radius: 6px;
-    background: oklch(var(--muted) / 0.5);
-  }
-
   .btn-close {
     @apply bg-transparent border-none cursor-pointer text-xs p-0.5 leading-none rounded transition-colors;
     color: oklch(var(--muted-foreground));
