@@ -7,7 +7,6 @@
   background: oklch(var(--card));
 }
 
-/* ===== Toolbar ===== */
 .pdf-controls {
   display: flex;
   align-items: center;
@@ -33,18 +32,10 @@
   justify-content: center;
   transition: all 0.12s;
 }
-.pdf-ctrl-btn:hover:not(:disabled) {
+.pdf-ctrl-btn:hover {
   background: oklch(var(--foreground) / 0.06);
   color: oklch(var(--foreground));
   border-color: oklch(var(--foreground) / 0.18);
-}
-.pdf-ctrl-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.pdf-layout-btn {
-  min-width: 70px;
 }
 
 .pdf-page-input {
@@ -73,60 +64,19 @@
   font-weight: 500;
 }
 
-/* ===== PDF Content Area ===== */
 .pdf-content {
   width: 100%;
-  flex: 1;
-  overflow: auto;
+  height: 100%;
   position: relative;
   background: oklch(var(--background));
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 16px;
 }
 
-/* ===== Pages Container ===== */
-.pdf-pages {
-  display: flex;
-  gap: 0;
-  justify-content: center;
-  align-items: flex-start;
+.pdf-embed {
+  width: 100%;
+  height: 100%;
+  border: none;
 }
 
-/* Single Page Layout */
-.pdf-layout-single {
-  flex-direction: column;
-  align-items: center;
-}
-
-/* Double Horizontal (side by side, like a book) */
-.pdf-layout-double-horizontal {
-  flex-direction: row;
-  gap: 16px;
-}
-
-/* Double Vertical (stacked top to bottom) */
-.pdf-layout-double-vertical {
-  flex-direction: column;
-  gap: 16px;
-  align-items: center;
-}
-
-/* ===== Page Wrapper ===== */
-.pdf-page-wrapper {
-  flex-shrink: 0;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-  border-radius: 2px;
-  background: white;
-}
-
-/* ===== Page Render ===== */
-.pdf-page-render {
-  display: block;
-}
-
-/* ===== Empty State ===== */
 .pdf-empty {
   display: flex;
   align-items: center;
@@ -137,7 +87,6 @@
   font-weight: 500;
 }
 
-/* ===== Legacy Toolbar (kept for compatibility) ===== */
 .pdf-toolbar {
   display: flex;
   align-items: center;
@@ -172,11 +121,4 @@
   border-radius: 2px;
   margin: 0 2px 0 6px;
   vertical-align: middle;
-}
-
-/* ===== iframe embedding (legacy - removed) ===== */
-.pdf-embed {
-  width: 100%;
-  height: 100%;
-  border: none;
 }

@@ -201,7 +201,7 @@ export function setupAgentProxy(): void {
   };
   
   // 每 500ms 轮询一次
-  const interval = setInterval(poll, 500);
+  setInterval(poll, 500);
   poll(); // 立即执行一次
   
   console.log('[AgentProxy] Agent proxy initialized (polling mode)');

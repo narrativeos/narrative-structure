@@ -2,13 +2,10 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-// PageController Bridge — 初始化 Page Agent 的 DOM 操作能力（不需要 LLM）
+// PageController Bridge — 初始化 Page Agent 的 DOM 操作能力
 import "./lib/pageControllerBridge";
 // Agent Proxy — 通过 postMessage 与外部通信，绕过 Tauri 安全限制
 import { setupAgentProxy } from "./lib/agentProxy";
-
-// Agent Proxy v2: 前端主动轮询 agent_poll_queue，在安全上下文中执行命令
-// 不再需要 useEvalQueue - setupAgentProxy 内部处理轮询
 import {
   Panel,
   Group,
@@ -55,50 +52,6 @@ function countNodes(node: TocNode): number {
   return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
 }
 
-// =========================================================================
-// 全局截图函数 — 供 MCP / 外部调用
-// =========================================================================
-// 注意：html2canvas v1.x 不支持 Tailwind CSS 3+ 使用的 oklch() 颜色函数
-// 在 Tauri 桌面应用中，请使用 MCP 的 takeScreenshot 工具（Playwright 原生截图）
-// 此函数仅作为备用方案，在纯 RGB 颜色的页面上可用
-async function takeScreenshot(): Promise<string> {
-  try {
-    // 动态导入 html2canvas（避免影响主 bundle）
-    const html2canvasModule = await import('html2canvas');
-    const html2canvas = html2canvasModule.default;
-    
-    const canvas = await html2canvas(document.body, {
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      scale: window.devicePixelRatio || 1,
-      logging: false,
-    });
-    
-    const dataUrl = canvas.toDataURL('image/png');
-    const base64 = dataUrl.split(',')[1];
-    
-    // 调用后端保存文件
-    try {
-      await invoke('save_screenshot', { base64 });
-    } catch {}
-    
-    return base64;
-  } catch (e: any) {
-    // oklch 颜色会导致 html2canvas 失败
-    // 提示用户使用 MCP 工具的 Playwright 原生截图
-    throw new Error(
-      '截图失败: ' + e.message +
-      '. 由于本应用使用 Tailwind CSS oklch 颜色，html2canvas 无法解析。' +
-      '请使用 MCP 工具的 takeScreenshot 命令进行截图。'
-    );
-  }
-}
-
-// 挂载全局函数
-if (typeof window !== 'undefined') {
-  (window as any).screenshot = takeScreenshot;
-}
-
 // ---- 最近项目持久化 ----
 interface ImportProgress { stage: string; percent: number; detail: string; }
 interface RecentProject { name: string; path: string; time: number }
@@ -132,6 +85,7 @@ function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
   const [projectKey, setProjectKey] = useState(0);
+  const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
   const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
   const [pageRect, setPageRect] = useState<{left:number;top:number;width:number;height:number}|null>(null);
@@ -154,8 +108,16 @@ function App() {
   const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
   const [pageInput, setPageInput] = useState("");
 
-  // Agent Proxy v2: setupAgentProxy 内部处理轮询，无需 useEvalQueue
-  
+  // 初始化 Agent Proxy (postMessage 通信)
+  useEffect(() => {
+    setupAgentProxy();
+  }, []);
+
+  // 区块标注开关 → 同步 iframe 信息层
+  useEffect(() => {
+    pdfIframeRef.current?.contentWindow?.postMessage({ type: "set-overlay", visible: showAnnotations }, "*");
+  }, [showAnnotations]);
+
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
     setMirrorBboxes([]); setLines([]); setPageRect(null);
@@ -192,11 +154,13 @@ function App() {
       setLines(newLines);
     };
     drawLinesRef.current = drawAllLines;
-    // 提取当前页文本 → 请求 bbox (react-pdf 模式：不再需要 iframe postMessage)
-      const requestBboxForCurrentPage = () => {
-        const blocks = pageBlocksRef.current;
-        if (!blocks?.length) return;
-        const page = currentPageRef.current;
+    // 提取当前页文本 → 请求 bbox
+    const requestBboxForCurrentPage = () => {
+      const blocks = pageBlocksRef.current;
+      if (!blocks?.length) return;
+      const iframe = pdfIframeRef.current?.contentWindow;
+      if (!iframe) return;
+      const page = currentPageRef.current;
       const pageTexts = blocks
         .filter(b => { try { return (JSON.parse(b.metadata||'{}').page||0) === page; } catch { return false; } })
         .filter(b => b.block_type !== 'empty' && b.content.trim())
@@ -206,13 +170,30 @@ function App() {
       const reqId = ++bboxRequestIdRef.current;
       (window as any).__flyRows = blocks.filter(b => pageTexts.includes(b.content)).map(b => ({ id: b.id, content: b.content }));
       (window as any).__flyReqId = reqId;
-      // TODO: react-pdf 模式下 bbox 定位需要重新实现
+      iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
     };
     requestBboxRef.current = requestBboxForCurrentPage;
     let rafId = 0;
     const handler = (e: MessageEvent) => {
       if (e.data?.type === 'pdf-scroll-offset') {
         cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines);
+        // 滚动时也刷新 bbox 位置（debounce 150ms）
+        const iframeWin = pdfIframeRef.current?.contentWindow;
+        if (iframeWin) {
+          clearTimeout(scrollBboxTimerRef.current);
+          const reqId = ++bboxRequestIdRef.current;
+          scrollBboxTimerRef.current = setTimeout(() => {
+            const texts = pageTextsRef.current;
+            if (!texts.length) return;
+            (window as any).__flyReqId = reqId;
+            iframeWin.postMessage({ type: "get-bbox-pos", page: currentPageRef.current, texts }, "*");
+          }, 150);
+        }
+        return;
+      }
+      // iframe 内 👁 按钮 → 同步父窗口 🏷️ 状态
+      if (e.data?.type === 'overlay-toggled') {
+        setShowAnnotations(e.data.visible);
         return;
       }
       const reqId = (window as any).__flyReqId;
@@ -227,10 +208,9 @@ function App() {
     window.addEventListener('message', handler);
     let scrollEl: Element | null = null;
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
-        // 注意：新的 react-pdf 查看器不再需要 iframe postMessage 通信
-        const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
-        return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
-      }, []);
+    const timer = setInterval(() => { if (!scrollEl) { scrollEl = document.querySelector('.page-blocks-list'); if (scrollEl) scrollEl.addEventListener('scroll', onBlockScroll, { passive: true }); } }, 500);
+    return () => { window.removeEventListener('message', handler); clearInterval(timer); clearTimeout(scrollBboxTimerRef.current); if (scrollEl) scrollEl.removeEventListener('scroll', onBlockScroll); };
+  }, []);
 
   const createEmptyPagePlaceholder = useCallback((page: number): Block => ({
     id: `empty-page-${page}`,
@@ -561,20 +541,6 @@ function App() {
     }
   }, [fillPageWindow]);
 
-  // 暴露到全局 window，供外部 Agent 通过 eval_queue 调用
-  useEffect(() => {
-    (window as any).nsOpenProject = (path: string, name?: string) => loadProject(path, name);
-    (window as any).nsCloseProject = () => handleCloseProject();
-    (window as any).nsNavigateToPage = (page: number) => handlePageChange(page);
-    (window as any).nsGetProjectPath = () => projectPath;
-    (window as any).nsGetProjectName = () => projectName;
-  }, [loadProject, handleCloseProject, handlePageChange, projectPath, projectName]);
-
-  // 初始化 Agent Proxy (postMessage 通信)
-  useEffect(() => {
-    setupAgentProxy();
-  }, []);
-
   // BlockEditor 和 MarkdownPreview 直接使用 pageBlocks（完整窗口）
   // 缓冲区命中逻辑（中间5页）仅在 handlePageChange 中用于判断是否重载
   const handleSelectBlock = useCallback(async (nodeId: string) => {
@@ -592,8 +558,7 @@ function App() {
         if (meta.page) targetPage = meta.page as number;
       } catch {}
       if (targetPage > 0) {
-        currentPageRef.current = targetPage;
-        setDisplayPage(targetPage);
+        pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: targetPage }, "*");
       }
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
@@ -729,7 +694,7 @@ function App() {
               if (e.key === 'Enter') {
                 const p = parseInt(pageInput, 10);
                 if (p > 0) {
-                  handlePageChange(p);
+                  pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: p }, "*");
                 }
               }
             }}
@@ -776,7 +741,7 @@ function App() {
                   <div className="workspace-pane">
                     <div className="workspace-pane-header">PDF 视图</div>
                     <div className="workspace-pane-body">
-                      <PdfViewer key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
+                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
                     </div>
                   </div>
                 </div>
@@ -786,8 +751,13 @@ function App() {
                     <div className="workspace-pane-body">
                       <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
                         onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
-                        onHoverBlock={(_b) => {
-                          // TODO: react-pdf 模式下 bbox highlight 需要重新实现
+                        onHoverBlock={(b) => {
+                          const iframe = pdfIframeRef.current?.contentWindow;
+                          if (b && b.block_type !== 'empty' && b.content.trim()) {
+                            iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
+                          } else {
+                            iframe?.postMessage({ type: "clear-highlight" }, "*");
+                          }
                         }}
                       />
                     </div>
@@ -818,17 +788,12 @@ function App() {
                 </div>
               </div>
               <div className="sidebar-divider" />
-                <div className="sidebar-section">
-                  <div className="sidebar-header">MCP 工具</div>
-                  <div className="sidebar-content">
-                    <AgentConsole
-                      projectPath={projectPath}
-                      projectName={projectName}
-                      blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)}
-                      onOpenProject={(path, name) => loadProject(path, name)}
-                    />
-                  </div>
+              <div className="sidebar-section">
+                <div className="sidebar-header">智能对话</div>
+                <div className="sidebar-content">
+                  <AgentConsole />
                 </div>
+              </div>
             </div>
           </Group>
         </Panel>
