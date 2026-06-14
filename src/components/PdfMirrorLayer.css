@@ -12,7 +12,6 @@
   position: absolute;
   pointer-events: none;
   cursor: default;
-  will-change: transform;
   border: 2px solid oklch(0.75 0.16 90 / 0.35);
   background: oklch(0.75 0.16 90 / 0.06);
 }

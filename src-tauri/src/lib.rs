@@ -249,25 +249,6 @@ pageHeight=p.getViewport({{scale:1}}).height*(pageWidth/p.getViewport({{scale:1}
 }});
 Object.keys(renderedPages).forEach(function(k){{renderedPages[k].remove();delete renderedPages[k];}});
 showPage(currentPage);
-// 重新请求 bbox 位置
-if(middleData){{
-var pg=middleData[currentPage-1];
-if(pg){{
-var texts=[];
-for(var bi=0;bi<(pg.para_blocks||[]).length;bi++){{
-for(var li=0;li<(pg.para_blocks[bi].lines||[]).length;li++){{
-for(var si=0;si<(pg.para_blocks[bi].lines[li].spans||[]).length;si++){{
-var sp=pg.para_blocks[bi].lines[li].spans[si];
-if(sp.content&&sp.content.trim().length>=3){{
-texts.push({{content:sp.content}});
-}}
-}}
-}}
-}}
-if(texts.length>0){{
-window.parent.postMessage({{type:'get-bbox-pos',page:currentPage,texts:texts}},'*');
-}}
-}}
 }}
 }},200);
 }});
