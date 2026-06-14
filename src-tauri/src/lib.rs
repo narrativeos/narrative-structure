@@ -152,7 +152,7 @@ ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
 
 pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
 pdfDoc=pdf;totalPages=pdf.numPages;
-pdf.getPage(1).then(function(p){{
+pdfDoc.getPage(1).then(function(p){{
 var v=p.getViewport({{scale:1}});
 pageWidth=window.innerWidth-40;
 pageHeight=v.height*(pageWidth/v.width);
@@ -246,7 +246,7 @@ if(!pdfDoc)return;
 var nw=window.innerWidth-40;
 if(nw!==pageWidth){{
 pageWidth=nw;
-pdf.getPage(1).then(function(p){{
+pdfDoc.getPage(1).then(function(p){{
 pageHeight=p.getViewport({{scale:1}}).height*(pageWidth/p.getViewport({{scale:1}}).width);
 }});
 Object.keys(renderedPages).forEach(function(k){{renderedPages[k].remove();delete renderedPages[k];}});
