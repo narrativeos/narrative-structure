@@ -210,6 +210,24 @@ window.addEventListener('wheel',function(e){{
   }},80);
 }},{{passive:false}});
 
+// 窗口 resize 时重新计算宽度并重新渲染
+var resizeTimer=null;
+window.addEventListener("resize",function(){{
+clearTimeout(resizeTimer);
+resizeTimer=setTimeout(function(){{
+if(!pdfDoc)return;
+var nw=Math.min(window.innerWidth-40,pageWidth||nw);
+if(nw!==pageWidth){{
+pageWidth=nw;
+pdf.getPage(1).then(function(p){{
+pageHeight=p.getViewport({{scale:1}}).height*(pageWidth/p.getViewport({{scale:1}}).width);
+}});
+// 清除缓存重新渲染
+Object.keys(renderedPages).forEach(function(k){{renderedPages[k].remove();delete renderedPages[k];}});
+showPage(currentPage);
+}}
+}},200);
+}});
 // PDF 加载
 pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
   pdfDoc=pdf;totalPages=pdf.numPages;
