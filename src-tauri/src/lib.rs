@@ -20,27 +20,37 @@ fn asset_protocol(
     let decoded = percent_encoding::percent_decode_str(path_str).decode_utf8_lossy();
     let path = std::path::PathBuf::from(decoded.as_ref());
 
-    // 如果是 .pdf 请求，返回按需渲染的 PDF.js 查看器 (支持单页/双页布局)
+    // 如果是 .pdf 请求，返回内嵌 PDF.js 查看器 (支持单页/双页布局切换)
     if path.extension().map(|e| e == "pdf").unwrap_or(false) && !uri.contains("raw=1") {
         let html = format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><style>
-body{{margin:0;background:#525659;overflow:hidden}}
+body{{margin:0;background:#525659}}
 #toolbar{{position:fixed;top:4px;left:8px;z-index:100;display:flex;gap:6px;align-items:center}}
 #toolbar button{{background:rgba(0,0,0,0.55);color:#ccc;border:1px solid rgba(255,255,255,0.15);border-radius:3px;padding:2px 8px;font-size:11px;cursor:pointer}}
 #toolbar button.active{{background:rgba(59,130,246,0.6);color:#fff;border-color:rgba(59,130,246,0.8)}}
-#viewer{{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;justify-content:center;align-items:center}}
-/* 单页模式 */
-.layout-single .page-wrap{{position:relative;display:block;margin:0 auto;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
-/* 双页横排模式 */
-.layout-double-h #page-container{{display:flex;flex-direction:row;gap:16px;align-items:flex-start}}
-.layout-double-h .page-wrap{{position:relative;display:inline-block;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
-/* 双页竖排模式 */
-.layout-double-v #page-container{{display:flex;flex-direction:column;gap:16px;align-items:center}}
-.layout-double-v .page-wrap{{position:relative;display:block;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
+#viewer{{padding:28px 0 8px 0;width:100%}}
+.page-wrap{{position:relative;display:block;margin:0 auto 4px auto;box-shadow:0 2px 8px rgba(0,0,0,0.3)}}
 .page-wrap canvas{{display:block;width:100%;height:auto}}
 .page-wrap .overlay{{position:absolute;top:0;left:0;pointer-events:none}}
 .page-num{{position:absolute;top:5px;right:8px;background:rgba(0,0,0,0.55);color:#ccc;padding:1px 6px;border-radius:3px;font-size:10px;font-family:monospace;pointer-events:none;z-index:5;user-select:none}}
 #indicator{{position:fixed;top:4px;right:8px;background:rgba(0,0,0,0.6);color:#ccc;padding:2px 8px;border-radius:3px;font-size:11px;z-index:10}}
 .leg-dot{{display:inline-block;width:7px;height:7px;border-radius:2px;margin:0 2px 0 5px;vertical-align:middle}}
+/* 布局模式 - 默认单页 */
+#page-container{{}}
+/* 双页横排 */
+.layout-double-h #page-container{{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:16px;
+  max-width:100%;
+}}
+.layout-double-h #page-container>.page-wrap{{margin:0!important}}
+/* 双页竖排 */
+.layout-double-v #page-container{{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:16px;
+}}
 </style></head><body>
 <div id="indicator">1 / ?</div>
 <div id="toolbar" style="display:flex;align-items:center;gap:4px">
@@ -57,22 +67,14 @@ body{{margin:0;background:#525659;overflow:hidden}}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-let pdfDoc=null, currentPage=0;
-let middleData=null, overlayVisible=true;
+let pdfDoc=null,currentPage=0,autoScrolling=false,lastWidth=0,renderTimer=null;
+let middleData=null,overlayVisible=true;
 let colorMap={{title:'transparent',text:'transparent',interline_equation:'transparent',table:'transparent',image:'transparent'}};
 let borderMap={{title:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',table:'#f59e0b',image:'#8b5cf6'}};
 let highlightedTexts=null;
+var currentLayout='single';
 
-// 从 URL 解析布局和目标页码
-var params=new URLSearchParams(window.location.search);
-var layout=params.get('layout')||'single';   // single | double-h | double-v
-var targetPage=parseInt(params.get('page'))||1;
-var pagesRange=params.get('pages');            // "3-4" 格式
-var pageStart=1, pageEnd=1;
-if(pagesRange){{var parts=pagesRange.split('-');pageStart=parseInt(parts[0]);pageEnd=parseInt(parts[1]);}}
-else if(layout!=='single'){{pageStart=targetPage;pageEnd=Math.min(targetPage+1,pdfDoc?pdfDoc.numPages:targetPage+1);}}
-else{{pageStart=targetPage;pageEnd=targetPage;}}
-
+// 三字符组 Jaccard 相似度 (0~1)
 function trigramSim(a,b){{
 if(a===b)return 1;
 var sa=new Set(),sb=new Set(),i;
@@ -84,30 +86,31 @@ return inter/(sa.size+sb.size-inter);
 }}
 
 function toggleOverlay(){{
-overlayVisible=!overlayVisible;
-var btn=document.getElementById('btn-overlay');
-btn.classList.toggle('active',overlayVisible);
-renderCurrentPages();
-window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
+  overlayVisible=!overlayVisible;
+  var btn=document.getElementById('btn-overlay');
+  if(overlayVisible){{btn.classList.add('active');}}
+  else{{btn.classList.remove('active');}}
+  if(pdfDoc)renderAllPages(pdfDoc,true);
+  window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
 }}
 
-function drawOverlay(canvas,pageNum){{
-if(!middleData||!overlayVisible)return;
-var page=middleData[pageNum-1];
-if(!page||!page.para_blocks)return;
-var ctx=canvas.getContext('2d');
-var pw=page.page_size[0],ph=page.page_size[1];
-var sx=canvas.width/pw,sy=canvas.height/ph;
-page.para_blocks.forEach(function(b){{
-var bbox=b.bbox;
-var x=bbox[0]*sx,y=bbox[1]*sy,w=(bbox[2]-bbox[0])*sx,h=(bbox[3]-bbox[1])*sy;
-var fill=colorMap[b.type]||'rgba(128,128,128,0.15)';
-var stroke=borderMap[b.type]||'#888';
-ctx.fillStyle=fill;ctx.strokeStyle=stroke;ctx.lineWidth=0.5;
-ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
-if(w>40&&h>12){{ctx.fillStyle=stroke;ctx.font='9px sans-serif';ctx.fillText(b.type,x+2,y+11);}}
-}});
-drawHighlight(ctx,page,sx,sy,pageNum);
+function drawOverlay(canvas,pageNum,viewportScale){{
+  if(!middleData||!overlayVisible)return;
+  var page=middleData[pageNum-1];
+  if(!page||!page.para_blocks)return;
+  var ctx=canvas.getContext('2d');
+  var pw=page.page_size[0],ph=page.page_size[1];
+  var sx=canvas.width/pw,sy=canvas.height/ph;
+  page.para_blocks.forEach(function(b){{
+    var bbox=b.bbox;
+    var x=bbox[0]*sx,y=bbox[1]*sy,w=(bbox[2]-bbox[0])*sx,h=(bbox[3]-bbox[1])*sy;
+    var fill=colorMap[b.type]||'rgba(128,128,128,0.15)';
+    var stroke=borderMap[b.type]||'#888';
+    ctx.fillStyle=fill;ctx.strokeStyle=stroke;ctx.lineWidth=0.5;
+    ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
+    if(w>40&&h>12){{ctx.fillStyle=stroke;ctx.font='9px sans-serif';ctx.fillText(b.type,x+2,y+11);}}
+  }});
+  drawHighlight(ctx,page,sx,sy,pageNum);
 }}
 
 function drawHighlight(ctx,page,sx,sy,pageNum){{
@@ -131,109 +134,172 @@ ctx.fillStyle='rgba(251,191,36,0.25)';ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
 }}}}}}}}
 }}
 
-function renderCurrentPages(){{
-if(!pdfDoc)return;
-var container=document.getElementById('page-container');
+function reRenderOverlay(){{
+if(!middleData)return;
+var wraps=document.querySelectorAll('.page-wrap');
+for(var wi=0;wi<wraps.length;wi++){{
+var w=wraps[wi],ov=w.querySelector('.overlay');
+if(!ov)continue;
+var pn=parseInt(w.id.replace('page-',''));
+var pg=middleData[pn-1];
+if(!pg||!pg.page_size)continue;
+var s=ov.width/pg.page_size[0];
+var ctx=ov.getContext('2d');
+ctx.clearRect(0,0,ov.width,ov.height);
+drawOverlay(ov,pn,s);
+}}
+}}
+
+pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
+pdfDoc=pdf;
+document.getElementById('indicator').textContent='1 / '+pdf.numPages;
+renderAllPages(pdf);setTimeout(function(){{detectCurrentPage();}},500);
+}});
+function scrollToPage(num){{
+autoScrolling=true;
+var el=document.getElementById('page-'+num);
+if(el){{el.scrollIntoView({{behavior:'smooth',block:'start'}});}}
+else{{window.scrollTo(0,0);}}
+setTimeout(function(){{autoScrolling=false;}},1000);
+}}
+// 一次性渲染：CSS width:100% 负责后续所有缩放，不再因 resize 重渲
+function renderAllPages(pdf,isReflow){{
 var viewer=document.getElementById('viewer');
-container.innerHTML='';
-// 设置布局 class
-viewer.className='layout-'+layout;
-var containerW=viewer.clientWidth;
-var containerH=viewer.clientHeight;
-
-var pagesToRender=[];
-for(var p=pageStart;p<=pageEnd;p++){{if(p>=1&&p<=pdfDoc.numPages)pagesToRender.push(p);}}
-if(!pagesToRender.length)return;
-
-var scale;
-if(layout==='single'){{
-scale=Math.min(containerW*0.95,containerH*0.95)/400; // 单页适配
-}}else{{
-if(layout==='double-h'){{
-scale=Math.min(containerW*0.48/400,containerH*0.95/600);
-}}else{{
-scale=Math.min(containerW*0.9/400,containerH*0.48/600);
+var containerWidth=viewer.clientWidth-16;
+lastWidth=containerWidth;
+renderedWidth=containerWidth;
+var existing={{}};
+if(isReflow){{
+viewer.querySelectorAll('.page-wrap').forEach(function(w){{
+existing[parseInt(w.id.replace('page-',''))]=w;
+}});
+for(var pn in existing){{
+if(parseInt(pn)>pdf.numPages){{existing[pn].remove();delete existing[pn];}}
 }}
+}}else{{
+viewer.querySelector('#page-container').innerHTML='';
 }}
-
-var pending=pagesToRender.length;
-pagesToRender.forEach(function(num){{
+for(var i=1;i<=pdf.numPages;i++){{
+(function(num){{
+var wrap=existing[num];
+if(wrap){{
 pdf.getPage(num).then(function(page){{
-var vp=page.getViewport({{scale:scale}});
+var scale=containerWidth/page.getViewport({{scale:1}}).width;
+var viewport=page.getViewport({{scale:scale}});
+var c=wrap.querySelector('canvas:not(.overlay)');
+if(c&&(c.width!==viewport.width||c.height!==viewport.height)){{
+c.width=viewport.width;c.height=viewport.height;
+page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
+}}
+var ov=wrap.querySelector('.overlay');
+if(ov&&(ov.width!==viewport.width||ov.height!==viewport.height)){{
+ov.width=viewport.width;ov.height=viewport.height;
+drawOverlay(ov,num,scale);
+}}
+}});
+}}else{{
+pdf.getPage(num).then(function(page){{
+var scale=containerWidth/page.getViewport({{scale:1}}).width;
+var viewport=page.getViewport({{scale:scale}});
 var wrap=document.createElement('div');
 wrap.className='page-wrap';
 wrap.id='page-'+num;
 var c=document.createElement('canvas');
-c.width=vp.width;c.height=vp.height;
+c.width=viewport.width;c.height=viewport.height;
 wrap.appendChild(c);
-page.render({{canvasContext:c.getContext('2d'),viewport:vp}});
+page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
 var ov=document.createElement('canvas');
 ov.className='overlay';
-ov.width=vp.width;ov.height=vp.height;
+ov.width=viewport.width;ov.height=viewport.height;
 wrap.appendChild(ov);
 drawOverlay(ov,num,scale);
 var badge=document.createElement('div');
 badge.className='page-num';
 badge.textContent='p'+num;
 wrap.appendChild(badge);
-container.appendChild(wrap);
-if(--pending===0){{
-currentPage=pageStart;
-document.getElementById('indicator').textContent=pageStart+' / '+(pdfDoc?pdfDoc.numPages:'?');
-window.parent.postMessage({{type:'pdf-page',page:currentPage}},'*');
-}}
-}});
+document.getElementById('page-container').appendChild(wrap);
 }});
 }}
-
-pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
-pdfDoc=pdf;
-// 更新 pageEnd (双页模式需要实际页数)
-if(layout!=='single'){{pageEnd=Math.min(pageStart+1,pdf.numPages);}}
-renderCurrentPages();
+}})(i);
+}}
+}}
+var renderedWidth=0;
+if(window.ResizeObserver){{
+new ResizeObserver(function(entries){{
+var w=entries[0].contentRect.width-16;
+if(w>renderedWidth*1.1&&renderedWidth>0&&pdfDoc){{
+clearTimeout(renderTimer);
+renderTimer=setTimeout(function(){{renderAllPages(pdfDoc,true);}},500);
+}}
+}}).observe(document.getElementById('viewer'));
+}}
+function detectCurrentPage(){{
+var pages=document.querySelectorAll('.page-wrap');
+var best=null, bestDist=Infinity;
+var vh=window.innerHeight;
+pages.forEach(function(el){{
+var rect=el.getBoundingClientRect();
+var inView=(rect.top>=0&&rect.top<vh*0.5)||(rect.top<=0&&rect.bottom>vh*0.1);
+if(inView&&(rect.top<bestDist||bestDist===Infinity)){{bestDist=rect.top;best=el;}}
 }});
-
+if(best){{
+var id=best.id;
+if(id&&id.startsWith('page-')){{
+var p=parseInt(id.replace('page-',''));
+if(p!==currentPage){{
+currentPage=p;
+document.getElementById('indicator').textContent=p+' / '+(pdfDoc?pdfDoc.numPages:'?');
+window.parent.postMessage({{type:'pdf-page',page:p}},'*');
+}}
+}}
+}}
+}}
+var scrollTimer=null;
+window.addEventListener('scroll',function(){{
+window.parent.postMessage({{type:'pdf-scroll-offset',scrollY:window.scrollY,page:currentPage}},'*');
+clearTimeout(scrollTimer);
+scrollTimer=setTimeout(detectCurrentPage,100);
+}},{{passive:true}});
 window.addEventListener('message',function(e){{
-if(!e.data)return;
-// 导航到指定页
-if(e.data.type==='navigate'){{
-var newPage=e.data.page;
-if(layout==='single'){{pageStart=newPage;pageEnd=newPage;}}
-else{{pageStart=newPage;pageEnd=Math.min(newPage+1,pdfDoc?pdfDoc.numPages:newPage+1);}}
-if(pdfDoc)renderCurrentPages();
-}}
-// 接收 middle-data
-if(e.data.type==='middle-data'){{
+if(e.data&&e.data.type==='navigate')scrollToPage(e.data.page);
+if(e.data&&e.data.type==='middle-data'){{
 middleData=e.data.data;
-if(pdfDoc)renderCurrentPages();
+if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
-// 高亮
-if(e.data.type==='highlight-bbox'){{
+if(e.data&&e.data.type==='highlight-bbox'){{
 highlightedTexts=e.data.texts||null;
-if(pdfDoc)renderCurrentPages();
+reRenderOverlay();
 }}
-if(e.data.type==='clear-highlight'){{
+if(e.data&&e.data.type==='clear-highlight'){{
 highlightedTexts=null;
-if(pdfDoc)renderCurrentPages();
+reRenderOverlay();
 }}
-// 显示/隐藏信息层
-if(e.data.type==='set-overlay'){{
+if(e.data&&e.data.type==='set-overlay'){{
 overlayVisible=!!e.data.visible;
 var btn=document.getElementById('btn-overlay');
-btn.classList.toggle('active',overlayVisible);
-if(pdfDoc)renderCurrentPages();
+if(overlayVisible){{btn.classList.add('active');}}
+else{{btn.classList.remove('active');}}
+if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
-// 切换布局
-if(e.data.type==='set-layout'){{
-layout=e.data.layout||'single';
-if(e.data.page){{
-if(layout==='single'){{pageStart=e.data.page;pageEnd=e.data.page;}}
-else{{pageStart=e.data.page;pageEnd=Math.min(e.data.page+1,pdfDoc?pdfDoc.numPages:e.data.page+1);}}
+if(e.data&&e.data.type==='set-layout'){{
+var newLayout=e.data.layout||'single';
+var container=document.getElementById('page-container');
+var parent=container.parentElement;
+parent.className='layout-'+newLayout;
+currentLayout=newLayout;
+if(newLayout==='single'){{
+// 单页模式：恢复原有布局
+container.style.display='';
+}}else if(newLayout==='double-h'){{
+// 双页横排：需要重新组织页面到 grid
+// 保持页面在 container 中，CSS grid 自动处理
+}}else if(newLayout==='double-v'){{
+// 双页竖排：flex column
 }}
-if(pdfDoc)renderCurrentPages();
+// 重新渲染以适配新布局尺寸
+if(pdfDoc)renderAllPages(pdfDoc,true);
 }}
-// 获取 bbox 位置
-if(e.data.type==='get-bbox-pos'){{
+if(e.data&&e.data.type==='get-bbox-pos'){{
 var pgEl=document.getElementById('page-'+e.data.page);
 if(!pgEl||!middleData)return;
 var pd=middleData[e.data.page-1];
@@ -267,7 +333,7 @@ used[bestIdx]=true;
 var b=allSpans[bestIdx].b;
 results.push({{x:b[0]/pw*pr.width+pr.left,y:b[1]/ph*pr.height+pr.top,w:(b[2]-b[0])/pw*pr.width,h:(b[3]-b[1])/ph*pr.height}});
 }}}}
-window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.left,top:pr.top,width:pr.width,height:pr.height}},ifrScrollY:0,ifrInnerH:window.innerHeight,bboxes:results}},'*');
+window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.left,top:pr.top,width:pr.width,height:pr.height}},ifrScrollY:window.scrollY,ifrInnerH:window.innerHeight,bboxes:results}},'*');
 }}
 }});
 </script></body></html>"#,
