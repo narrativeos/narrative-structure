@@ -158,8 +158,12 @@ function renderPage(num){{
     var wrap=renderedPages[num];
     if(!wrap){{wrap=createPageWrap(num);renderedPages[num]=wrap;}}
     var c=wrap.querySelector('canvas:not(.overlay)');
-    c.width=pageWidth;c.height=pageHeight;
-    page.render({{canvasContext:c.getContext('2d'),viewport:viewport}});
+    var dpr=window.devicePixelRatio||1;
+    c.width=pageWidth*dpr;c.height=pageHeight*dpr;
+    c.style.width=pageWidth+'px';c.style.height=pageHeight+'px';
+    var ctx=c.getContext('2d');
+    ctx.scale(dpr,dpr);
+    page.render({{canvasContext:ctx,viewport:viewport}});
     var ov=wrap.querySelector('.overlay');
     ov.width=pageWidth;ov.height=pageHeight;
     drawOverlay(ov,num);
