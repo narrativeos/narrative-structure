@@ -107,7 +107,7 @@ fn make_project_id(project_name: &str) -> String {
     };
 
     // 检查是否已有同名项目，自动加 _2/_3 后缀
-    let projects_dir = project_root_dir().join("Projects");
+    let projects_dir = project_root_dir().join("projects");
     if projects_dir.is_dir() {
         let mut seq = 1u32;
         for entry in std::fs::read_dir(&projects_dir).into_iter().flatten() {
@@ -229,9 +229,9 @@ fn import_new_project_blocking(
     let zip_size = fs::metadata(&zip_file).map(|m| m.len()).unwrap_or(0);
     page_mapper::emit_log(&app_handle, &format!("[import] 开始导入: {} ({:.1} MB)", project_name, zip_size as f64 / 1_048_576.0), None);
 
-    // 项目文件夹 = <project_root>/Projects/YYYY-MM-DD-Name/
+    // 项目文件夹 = <project_root>/projects/YYYY-MM-DD-Name/
     let project_id = make_project_id(project_name);
-    let project_dir = project_root_dir().join("Projects").join(&project_id);
+    let project_dir = project_root_dir().join("projects").join(&project_id);
     let log_path = project_dir.join("import.log");
     page_mapper::emit_log(&app_handle, &format!("[import] 项目目录: {}", project_dir.display()), Some(&log_path));
 

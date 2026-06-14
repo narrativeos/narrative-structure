@@ -8,7 +8,7 @@ fn main() {
     let project_path = PathBuf::from(std::env::var("HOME").unwrap())
         .join(".narrativeos")
         .join("narrative-structure")
-        .join("Projects")
+        .join("projects")
         .join("00560806_025936_3018");
     
     println!("\n========================================");

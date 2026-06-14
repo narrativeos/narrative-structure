@@ -38,19 +38,19 @@ fn print_usage() {
     println!();
     println!("EXAMPLES:");
     println!("  # Start MCP Server");
-    println!("  narrative-mcp serve -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
+    println!("  narrative-mcp serve -p ~/.narrativeos/narrative-structure/projects/MyDoc");
     println!();
     println!("  # List all tools");
-    println!("  narrative-mcp tools -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
+    println!("  narrative-mcp tools -p ~/.narrativeos/narrative-structure/projects/MyDoc");
     println!();
     println!("  # Call a tool");
-    println!("  narrative-mcp call get_toc -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
-    println!("  narrative-mcp call get_blocks --limit 10 -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
-    println!("  narrative-mcp call search_blocks --query 'keyword' -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
+    println!("  narrative-mcp call get_toc -p ~/.narrativeos/narrative-structure/projects/MyDoc");
+    println!("  narrative-mcp call get_blocks --limit 10 -p ~/.narrativeos/narrative-structure/projects/MyDoc");
+    println!("  narrative-mcp call search_blocks --query 'keyword' -p ~/.narrativeos/narrative-structure/projects/MyDoc");
     println!();
     println!("  # Get project info");
-    println!("  narrative-mcp project -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
-    println!("  narrative-mcp project --json -p ~/.narrativeos/narrative-structure/Projects/MyDoc");
+    println!("  narrative-mcp project -p ~/.narrativeos/narrative-structure/projects/MyDoc");
+    println!("  narrative-mcp project --json -p ~/.narrativeos/narrative-structure/projects/MyDoc");
 }
 
 fn main() {
