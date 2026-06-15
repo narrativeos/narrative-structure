@@ -279,7 +279,7 @@ const PdfViewer = ({
       });
   }, [projectPath]);
 
-  // 翻页处理 - 使用 ref 读取最新值，避免依赖链不稳定
+  // 翻页处理 — 只加载页面图片，不依赖 page mapping
   const goToPageRef = useRef<(page: number) => Promise<void>>(async (page) => {});
   goToPageRef.current = async (page: number) => {
     const total = totalPagesRef.current;
@@ -289,10 +289,10 @@ const PdfViewer = ({
     setLoading(true);
     setLoadingMsg("加载页面...");
     try {
-      // 先加载 page mapping（后端有内存缓存，瞬间返回）
-      await loadPageMappingRangeRef.current(page, total);
-      // 再加载页面图片
+      // 只加载页面图片
       await loadPageRangeRef.current(page, total);
+      // 异步加载 page mapping（不阻塞翻页），用于标注
+      loadPageMappingRangeRef.current(page, total);
     } finally {
       setLoading(false);
     }
