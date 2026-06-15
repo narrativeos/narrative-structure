@@ -12,7 +12,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: stretch;
   position: relative;
 }
 
@@ -20,7 +20,6 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -28,38 +27,38 @@
 
 .page-wrap {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .page-wrap.prev-page {
-  flex: 1;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  flex: 1 1 auto;
   overflow: hidden;
+  opacity: 0.6;
 }
 
 .page-wrap.current-page {
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  max-height: 100%;
+  overflow: visible;
 }
 
 .page-wrap.next-page {
-  flex: 1;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  flex: 1 1 auto;
   overflow: hidden;
+  opacity: 0.6;
 }
 
 .page-wrap img {
   display: block;
-  max-width: 100%;
+  width: 100%;
   height: auto;
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .page-num {
@@ -78,7 +77,7 @@
 }
 
 .page-indicator {
-  position: fixed;
+  position: absolute;
   top: 4px;
   right: 8px;
   background: rgba(0, 0, 0, 0.6);
@@ -86,11 +85,11 @@
   padding: 2px 8px;
   border-radius: 3px;
   font-size: 11px;
-  z-index: 10;
+  z-index: 100;
 }
 
 .nav-buttons {
-  position: fixed;
+  position: absolute;
   right: 8px;
   top: 50%;
   transform: translateY(-50%);
