@@ -8,6 +8,7 @@ use std::time::UNIX_EPOCH;
 
 
 use crate::markdown_parser::parse_markdown;
+use crate::ocr_adapter;
 use crate::page_mapper;
 
 
@@ -90,7 +91,9 @@ fn make_project_id(project_name: &str) -> String {
         .unwrap()
         .as_secs();
     let days = secs / 86400;
-    let (y, m, d) = days_to_ymd(days as i64);
+    // days_to_ymd 使用 Copeland 算法，day 0 = 公元前 4713 年 11 月 24 日（儒略日起点）
+    // UNIX_EPOCH (1970-01-01) 对应的偏移量是 719531 天
+    let (y, m, d) = days_to_ymd(days as i64 + 719531);
     let date_prefix = format!("{:04}-{:02}-{:02}", y, m, d);
 
     // 清理项目名称：只保留 Unicode 字母（含中文）、数字、连字符、下划线
@@ -152,8 +155,8 @@ fn days_to_ymd(days: i64) -> (i64, u8, u8) {
     (y, m as u8, d as u8)
 }
 
-/// 递归搜索目录中匹配的文件
-fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> {
+/// 递归搜索目录中匹配的文件（公开供 ocr_adapter 使用）
+pub fn find_file_in_dir(dir: &Path, predicate: fn(&str) -> bool) -> Option<PathBuf> {
     if !dir.is_dir() {
         return None;
     }
@@ -347,7 +350,7 @@ fn import_new_project_blocking(
     conn.execute_batch(DB_SCHEMA)
         .map_err(|e| format!("建表失败: {}", e))?;
 
-    // Markdown 行级分块 → 基于 _middle.json bbox 文本匹配页码 → 写入 DB
+    // Markdown 行级分块 → 自动识别 OCR 数据源 → 页码映射 → 写入 DB
     if let Some(ref md) = md_content {
             page_mapper::emit_log(&app_handle, &format!("[import] MD 大小: {} bytes", md.len()), Some(&log_path));
             page_mapper::emit_progress(&app_handle, "解析 Markdown", 5, "行级分块...");
@@ -357,30 +360,43 @@ fn import_new_project_blocking(
                 parsed.iter().filter(|b| b.block_type == "heading").count()), Some(&log_path));
 
             if !parsed.is_empty() {
-                // 页码映射: 优先使用 content_list.json（page_idx 最可靠）
+                // 自动识别 OCR 数据源并加载页码映射
                 let assets_dir = project_dir.join("assets");
-                let content_list_mapped = if let Some(cl_path) = find_file_in_dir(&assets_dir, |n| n.contains("content_list") && !n.contains("v2") && n.ends_with(".json")) {
-                    page_mapper::emit_progress(&app_handle, "加载信息层", 6, "使用 content_list.json page_idx...");
-                    let ok = page_mapper::apply_content_list_page_mapping(&app_handle, &cl_path, &mut parsed);
-                    if ok {
-                        page_mapper::emit_log(&app_handle, "[import] content_list 页码映射完成", Some(&log_path));
-                    } else {
-                        page_mapper::emit_log(&app_handle, "[import] content_list 映射失败，将回退 _middle.json", Some(&log_path));
+                let mapped = if let Some(source) = ocr_adapter::detect_ocr_source(&assets_dir) {
+                    page_mapper::emit_log(&app_handle, &format!("[import] 检测到 OCR 数据源: {}", source), Some(&log_path));
+                    let adapter = ocr_adapter::create_adapter(&source);
+                    page_mapper::emit_progress(&app_handle, "加载信息层", 6, &format!("使用 {} 适配器...", adapter.name()));
+                    
+                    match adapter.load_page_mapping(&assets_dir) {
+                        Ok(mapping) => {
+                            page_mapper::emit_log(&app_handle, &format!("[import] 加载完成: {} 页, {} 个块", 
+                                mapping.page_count,
+                                mapping.pages.iter().map(|p| p.blocks.len()).sum::<usize>()), Some(&log_path));
+                            
+                            // 使用归一化的 PageMapping 进行页码映射
+                            apply_page_mapping_from_mapping(&app_handle, &mapping, &mut parsed);
+                            true
+                        }
+                        Err(e) => {
+                            page_mapper::emit_log(&app_handle, &format!("[import] 适配器加载失败: {}", e), Some(&log_path));
+                            // 无 fallback，标记所有行为第1页
+                            for block in parsed.iter_mut() {
+                                block.metadata = r#"{"page":1}"#.to_string();
+                            }
+                            false
+                        }
                     }
-                    ok
                 } else {
+                    page_mapper::emit_log(&app_handle, "[import] 未检测到 OCR 数据源", Some(&log_path));
+                    // 无 fallback，标记所有行为第1页
+                    for block in parsed.iter_mut() {
+                        block.metadata = r#"{"page":1}"#.to_string();
+                    }
                     false
                 };
 
-                // 如有 _middle.json 且 content_list 未覆盖所有行，作为补充
-                if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-                    if content_list_mapped {
-                        page_mapper::emit_log(&app_handle, "[import] _middle.json 已跳过（已使用 content_list）", Some(&log_path));
-                    } else {
-                        page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
-                        page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed);
-                        page_mapper::emit_log(&app_handle, "[import] 信息层加载完成", Some(&log_path));
-                    }
+                if mapped {
+                    page_mapper::emit_log(&app_handle, "[import] 页码映射完成", Some(&log_path));
                 }
 
                 page_mapper::emit_log(&app_handle, "[import] 写入数据库阶段开始", Some(&log_path));
@@ -625,12 +641,34 @@ fn import_document_blocking(
         ));
     }
 
-    // 基于 _middle.json bbox span 文本 → MD 行匹配页码
-    if let Some(middle_path) = find_file_in_dir(&assets_dir, |n| n.ends_with("_middle.json")) {
-        page_mapper::emit_progress(&app_handle, "加载信息层", 6, "展开 _middle.json bbox...");
-        page_mapper::emit_log(&app_handle, "[import-doc] 开始加载信息层", Some(&log_path));
-        page_mapper::apply_bbox_page_mapping(&app_handle, &middle_path, &mut parsed_blocks);
-        page_mapper::emit_log(&app_handle, "[import-doc] 信息层加载完成", Some(&log_path));
+    // 自动识别 OCR 数据源并加载页码映射
+    if let Some(source) = ocr_adapter::detect_ocr_source(&assets_dir) {
+        page_mapper::emit_log(&app_handle, &format!("[import-doc] 检测到 OCR 数据源: {}", source), Some(&log_path));
+        let adapter = ocr_adapter::create_adapter(&source);
+        page_mapper::emit_progress(&app_handle, "加载信息层", 6, &format!("使用 {} 适配器...", adapter.name()));
+        
+        match adapter.load_page_mapping(&assets_dir) {
+            Ok(mapping) => {
+                page_mapper::emit_log(&app_handle, &format!("[import-doc] 加载完成: {} 页, {} 个块", 
+                    mapping.page_count,
+                    mapping.pages.iter().map(|p| p.blocks.len()).sum::<usize>()), Some(&log_path));
+                
+                // 使用归一化的 PageMapping 进行页码映射
+                apply_page_mapping_from_mapping(&app_handle, &mapping, &mut parsed_blocks);
+                page_mapper::emit_log(&app_handle, "[import-doc] 信息层加载完成", Some(&log_path));
+            }
+            Err(e) => {
+                page_mapper::emit_log(&app_handle, &format!("[import-doc] 适配器加载失败: {}", e), Some(&log_path));
+                for block in parsed_blocks.iter_mut() {
+                    block.metadata = r#"{"page":1}"#.to_string();
+                }
+            }
+        }
+    } else {
+        page_mapper::emit_log(&app_handle, "[import-doc] 未检测到 OCR 数据源", Some(&log_path));
+        for block in parsed_blocks.iter_mut() {
+            block.metadata = r#"{"page":1}"#.to_string();
+        }
     }
 
     let block_count = parsed_blocks.len();
@@ -678,7 +716,7 @@ fn import_document_blocking(
     ))
 }
 
-/// 查找 assets 目录下匹配模式的文件
+/// 查找 assets 目录下匹配模式的文件（使用全局项目状态）
 #[tauri::command]
 pub fn find_asset_file(
     state: tauri::State<'_, ProjectState>,
@@ -896,6 +934,198 @@ pub fn eval_result_read(result: String) -> Result<String, String> {
     fs::write(result_path, &result)
         .map_err(|e| format!("write error: {}", e))?;
     Ok("written".to_string())
+}
+
+/// 使用归一化的 PageMapping 进行页码映射
+/// 将 PageMapping 中的文本块与 MD blocks 进行文本匹配，标定页码
+/// 同时将 bbox / block_type / spans 信息写入 metadata JSON
+fn apply_page_mapping_from_mapping(
+    app: &tauri::AppHandle,
+    mapping: &ocr_adapter::PageMapping,
+    blocks: &mut [crate::markdown_parser::ParsedBlock],
+) {
+    // 收集所有有文本的 blocks，按页分组
+    let text_blocks = mapping.get_text_blocks();
+    if text_blocks.is_empty() {
+        eprintln!("[page-map] PageMapping 中没有文本块");
+        // 所有行标记为第1页
+        for block in blocks.iter_mut() {
+            block.metadata = r#"{"page":1}"#.to_string();
+        }
+        return;
+    }
+
+    // 构建页尾标记：每页取最后一个有文本的块
+    let mut page_markers: std::collections::BTreeMap<usize, String> = std::collections::BTreeMap::new();
+    for (page_idx, block) in &text_blocks {
+        page_markers.entry(*page_idx).or_insert_with(|| String::new());
+        if !block.text.is_empty() {
+            page_markers.insert(*page_idx, block.text.clone());
+        }
+    }
+
+    if page_markers.is_empty() {
+        eprintln!("[page-map] 未找到有效的页尾标记");
+        for block in blocks.iter_mut() {
+            block.metadata = r#"{"page":1}"#.to_string();
+        }
+        return;
+    }
+
+    page_mapper::emit_progress(app, "匹配页码", 10, &format!(
+        "{} 个页标记", page_markers.len()
+    ));
+
+    // 在 blocks 中顺序搜索页标记
+    let n_blocks = blocks.len();
+    let mut boundaries: Vec<(usize, usize)> = Vec::new();
+    let mut mi = 0;
+    let markers: Vec<(usize, String)> = page_markers.into_iter()
+        .map(|(p, t)| (p + 1, page_mapper::normalize_text(&t)))
+        .collect();
+
+    for bi in 0..n_blocks {
+        if mi >= markers.len() { break; }
+        let block_text = page_mapper::normalize_text(&blocks[bi].content);
+        let (target_page, ref marker_text) = markers[mi];
+
+        if !marker_text.is_empty()
+            && (block_text == *marker_text || block_text.contains(marker_text.as_str()))
+        {
+            boundaries.push((bi, target_page));
+            mi += 1;
+        }
+    }
+
+    let b_count = boundaries.len();
+    eprintln!("[page-map] 找到 {} 个页边界", b_count);
+
+    // 构建每页的 OCR blocks 查找表 (page_idx -> Vec<BlockEntry>)
+    let page_blocks_map: std::collections::HashMap<usize, &[ocr_adapter::BlockEntry]> = mapping.pages.iter()
+        .map(|p| (p.page_idx, &p.blocks[..]))
+        .collect();
+
+    if b_count == 0 {
+        eprintln!("[page-map] 未找到页边界，所有行标记为第1页");
+        for block in blocks.iter_mut() {
+            block.metadata = r#"{"page":1}"#.to_string();
+        }
+        return;
+    }
+
+    // 按边界赋值页码 + bbox/block_type/spans
+    let first_boundary_block = boundaries[0].0;
+    let first_page = 1usize;
+
+    for bi in 0..first_boundary_block {
+        blocks[bi].metadata = build_metadata_json(first_page, 0, &page_blocks_map);
+    }
+
+    for wi in 0..b_count.wrapping_sub(1) {
+        let (start_bi, page) = boundaries[wi];
+        let end_bi = boundaries[wi + 1].0;
+        for bi in start_bi..end_bi {
+            blocks[bi].metadata = build_metadata_json(page, bi, &page_blocks_map);
+        }
+    }
+
+    let (last_bi, last_page) = boundaries[b_count - 1];
+    for bi in last_bi..n_blocks {
+        blocks[bi].metadata = build_metadata_json(last_page, bi, &page_blocks_map);
+    }
+
+    page_mapper::emit_progress(app, "匹配页码", 65, &format!(
+        "{} 边界", b_count
+    ));
+    eprintln!("[page-map] 完成: {} 边界", b_count);
+}
+
+/// 构建 metadata JSON: {"page": N, "bbox": [...], "block_type": "...", "spans": [...]}
+fn build_metadata_json(
+    page: usize,
+    _block_idx: usize,
+    _page_blocks_map: &std::collections::HashMap<usize, &[ocr_adapter::BlockEntry]>,
+) -> String {
+    // 目前先只写入 page 信息
+    // bbox/block_type/spans 的精确匹配需要更复杂的文本对齐逻辑
+    // 这里先保留 page 信息，后续可逐步增强
+    format!("{{\"page\":{}}}", page)
+}
+
+/// 获取当前项目的 PageMapping JSON（供前端 PDF viewer 使用，使用全局项目状态）
+#[tauri::command]
+pub fn get_page_mapping_json(
+    state: tauri::State<'_, ProjectState>,
+) -> Result<Option<String>, String> {
+    let path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
+    let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
+    let assets_dir = project_path.join("assets");
+
+    // 检测 OCR 数据源
+    let source = ocr_adapter::detect_ocr_source(&assets_dir)
+        .ok_or("未检测到 OCR 数据源")?;
+    
+    let adapter = ocr_adapter::create_adapter(&source);
+    let mapping = adapter.load_page_mapping(&assets_dir)?;
+
+    // 序列化为 JSON
+    let json = serde_json::to_string(&mapping_to_serializable(&mapping))
+        .map_err(|e| format!("序列化 PageMapping 失败: {}", e))?;
+    
+    Ok(Some(json))
+}
+
+/// 可序列化的 PageMapping（用于 JSON 输出）
+#[derive(serde::Serialize)]
+struct SerializablePageMapping {
+    source: String,
+    page_count: usize,
+    pages: Vec<SerializablePageEntry>,
+}
+
+#[derive(serde::Serialize)]
+struct SerializablePageEntry {
+    page_idx: usize,
+    page_size: [f64; 2],
+    blocks: Vec<SerializableBlockEntry>,
+}
+
+#[derive(serde::Serialize)]
+struct SerializableBlockEntry {
+    id: String,
+    block_type: String,
+    bbox: [f64; 4],
+    text: String,
+    level: Option<u8>,
+    spans: Vec<SerializableSpanEntry>,
+}
+
+#[derive(serde::Serialize)]
+struct SerializableSpanEntry {
+    bbox: [f64; 4],
+    content: String,
+}
+
+fn mapping_to_serializable(mapping: &ocr_adapter::PageMapping) -> SerializablePageMapping {
+    SerializablePageMapping {
+        source: mapping.source.to_string(),
+        page_count: mapping.page_count,
+        pages: mapping.pages.iter().map(|p| SerializablePageEntry {
+            page_idx: p.page_idx,
+            page_size: p.page_size,
+            blocks: p.blocks.iter().map(|b| SerializableBlockEntry {
+                id: b.id.clone(),
+                block_type: b.block_type.to_string(),
+                bbox: b.bbox,
+                text: b.text.clone(),
+                level: b.level,
+                spans: b.spans.iter().map(|s| SerializableSpanEntry {
+                    bbox: s.bbox,
+                    content: s.content.clone(),
+                }).collect(),
+            }).collect(),
+        }).collect(),
+    }
 }
 
 #[cfg(test)]
