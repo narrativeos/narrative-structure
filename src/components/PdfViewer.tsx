@@ -60,6 +60,11 @@ const PdfViewer = ({
   const containerRef = useRef<HTMLDivElement>(null);
   // LRU: 跟踪已加载的页面，超出窗口范围的自动清理
   const loadedPagesRef = useRef<Set<number>>(new Set());
+  // 使用 refs 存储最新值，避免 useCallback 依赖链不稳定导致无限重渲染
+  const currentPageRef = useRef(currentPage);
+  const totalPagesRef = useRef(totalPages);
+  currentPageRef.current = currentPage;
+  totalPagesRef.current = totalPages;
 
   // LRU 清理：保留当前页 ±5 页，清除超出范围的旧图片
   const evictOldPages = useCallback((currPage: number) => {
@@ -181,6 +186,12 @@ const PdfViewer = ({
     []
   );
 
+  // 使用 refs 存储加载函数，避免 useEffect 依赖不稳定导致重复初始化
+  const loadPageRangeRef = useRef(loadPageRange);
+  loadPageRangeRef.current = loadPageRange;
+  const loadPageMappingRangeRef = useRef(loadPageMappingRange);
+  loadPageMappingRangeRef.current = loadPageMappingRange;
+
   // 加载页数和 page mapping（PDF 路径由后端自动获取）
   useEffect(() => {
     // 没有项目路径时不初始化（等待项目打开）
@@ -210,11 +221,11 @@ const PdfViewer = ({
         setTotalPages(count);
 
         // 按需加载初始页的 page mapping (1, 2, 3)
-        await loadPageMappingRange(1, count);
+        await loadPageMappingRangeRef.current(1, count);
 
         // 加载初始页面 (1, 2, 3)
         setLoadingMsg("渲染页面...");
-        await loadPageRange(1, count);
+        await loadPageRangeRef.current(1, count);
         clearTimeout(timeout);
         completedRef.value = true;
         setLoading(false);
@@ -226,44 +237,47 @@ const PdfViewer = ({
         setLoading(false);
         setError(`初始化失败: ${e}`);
       });
-  }, [projectPath, loadPageRange, loadPageMappingRange]);
+  }, [projectPath]);
 
-  // 翻页处理
-  const goToPage = useCallback(
-    (page: number) => {
-      if (page < 1 || page > totalPages) return;
-      setCurrentPage(page);
-      onPageChange?.(page);
-      // 按需加载新页范围的 page mapping
-      loadPageMappingRange(page, totalPages);
-      loadPageRange(page, totalPages);
-    },
-    [totalPages, onPageChange, loadPageRange, loadPageMappingRange]
-  );
+  // 翻页处理 - 使用 ref 读取最新值，避免依赖链不稳定
+  const goToPageRef = useRef<(page: number) => void>((page) => {});
+  goToPageRef.current = (page: number) => {
+    const total = totalPagesRef.current;
+    if (page < 1 || page > total) return;
+    setCurrentPage(page);
+    onPageChange?.(page);
+    // 按需加载新页范围的 page mapping
+    loadPageMappingRangeRef.current(page, total);
+    loadPageRangeRef.current(page, total);
+  };
+
+  const goToPage = (page: number) => goToPageRef.current(page);
 
   // 键盘翻页
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const curr = currentPageRef.current;
+      const total = totalPagesRef.current;
       if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
-        goToPage(currentPage + 1);
+        goToPageRef.current(curr + 1);
       }
       if (e.key === "ArrowUp" || e.key === "PageUp") {
         e.preventDefault();
-        goToPage(currentPage - 1);
+        goToPageRef.current(curr - 1);
       }
       if (e.key === "Home") {
         e.preventDefault();
-        goToPage(1);
+        goToPageRef.current(1);
       }
       if (e.key === "End") {
         e.preventDefault();
-        goToPage(totalPages);
+        goToPageRef.current(total);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [currentPage, totalPages, goToPage]);
+  }, []);
 
   // 鼠标滚轮翻页
   useEffect(() => {
@@ -272,8 +286,9 @@ const PdfViewer = ({
       e.preventDefault();
       clearTimeout(wheelTimer);
       wheelTimer = setTimeout(() => {
-        if (e.deltaY > 30) goToPage(currentPage + 1);
-        else if (e.deltaY < -30) goToPage(currentPage - 1);
+        const curr = currentPageRef.current;
+        if (e.deltaY > 30) goToPageRef.current(curr + 1);
+        else if (e.deltaY < -30) goToPageRef.current(curr - 1);
       }, 80);
     };
     const container = containerRef.current;
@@ -285,7 +300,7 @@ const PdfViewer = ({
         container.removeEventListener("wheel", handler);
       }
     };
-  }, [currentPage, totalPages, goToPage]);
+  }, []);
 
   // 显示错误
   if (error) {
