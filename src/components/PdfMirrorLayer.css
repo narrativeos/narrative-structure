@@ -4,17 +4,57 @@
   left: 0;
   width: 100%;
   height: 100%;
-  pointer-events: none;
   z-index: 50;
+  /* pointer-events 由组件 inline style 控制 */
+  /* 淡入淡出过渡 */
+  transition: opacity 0.25s ease;
 }
 
 .mirror-bbox {
   position: absolute;
-  pointer-events: none;
+  pointer-events: auto;
   cursor: default;
   will-change: transform;
   border: 2px solid oklch(0.75 0.16 90 / 0.35);
   background: oklch(0.75 0.16 90 / 0.06);
+  border-radius: 2px;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease, opacity 0.25s ease;
+}
+
+.mirror-bbox:hover {
+  filter: brightness(1.1);
+}
+
+/* 选中状态 */
+.mirror-bbox-selected {
+  z-index: 60;
+}
+
+/* 悬停高亮状态 */
+.mirror-bbox-hovered {
+  z-index: 55;
+  filter: brightness(1.15);
+}
+
+/* 块类型颜色变体 — 在组件中通过 inline style 设置，此处仅提供基础过渡 */
+.mirror-bbox-heading {
+  /* 红色系 — heading */
+}
+
+.mirror-bbox-text {
+  /* 蓝色系 — text */
+}
+
+.mirror-bbox-interline_equation {
+  /* 绿色系 — equation */
+}
+
+.mirror-bbox-table {
+  /* 黄色系 — table */
+}
+
+.mirror-bbox-image {
+  /* 紫色系 — image */
 }
 
 .mirror-page-frame {

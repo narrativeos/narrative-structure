@@ -69,6 +69,7 @@
   height: 100%;
   position: relative;
   background: oklch(var(--background));
+  overflow: visible;
 }
 
 .pdf-embed {
