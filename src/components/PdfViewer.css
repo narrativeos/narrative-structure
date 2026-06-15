@@ -2,124 +2,129 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  background: oklch(var(--card));
-}
-
-.pdf-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
-  background: oklch(var(--surface-alt));
-  border-bottom: 1px solid oklch(var(--border));
-  flex-shrink: 0;
-  min-height: 34px;
-}
-
-.pdf-ctrl-btn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid oklch(var(--border));
-  border-radius: 6px;
-  background: oklch(var(--card));
-  color: oklch(var(--muted-foreground));
-  cursor: pointer;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.12s;
-}
-.pdf-ctrl-btn:hover {
-  background: oklch(var(--foreground) / 0.06);
-  color: oklch(var(--foreground));
-  border-color: oklch(var(--foreground) / 0.18);
-}
-
-.pdf-page-input {
-  width: 44px;
-  height: 28px;
-  border: 1px solid oklch(var(--border));
-  border-radius: 6px;
-  background: oklch(var(--card));
-  color: oklch(var(--foreground));
-  font-size: 12px;
-  font-weight: 600;
-  text-align: center;
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  font-variant-numeric: tabular-nums;
-}
-.pdf-page-input:focus {
-  border-color: oklch(var(--primary));
-  box-shadow: 0 0 0 2px oklch(var(--primary) / 0.15);
-}
-
-.pdf-page-total {
-  font-size: 11px;
-  color: oklch(var(--muted-foreground));
-  margin: 0 4px;
-  font-weight: 500;
+  background: #525659;
+  position: relative;
 }
 
 .pdf-content {
   width: 100%;
   height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   position: relative;
-  background: oklch(var(--background));
-  overflow: visible;
 }
 
-.pdf-embed {
+.page-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
-  border: none;
+  overflow: hidden;
+}
+
+.page-wrap {
+  position: relative;
+  display: block;
+  width: 100%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.page-wrap.prev-page {
+  flex: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.page-wrap.current-page {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-wrap.next-page {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.page-wrap img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.page-num {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ccc;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: monospace;
+  pointer-events: none;
+  z-index: 5;
+  user-select: none;
+}
+
+.page-indicator {
+  position: fixed;
+  top: 4px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #ccc;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  z-index: 10;
+}
+
+.nav-buttons {
+  position: fixed;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 100;
+}
+
+.nav-buttons button {
+  background: rgba(0, 0, 0, 0.55);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  padding: 8px 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.nav-buttons button:hover {
+  background: rgba(59, 130, 246, 0.6);
+}
+
+.nav-buttons button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .pdf-empty {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
   height: 100%;
-  font-size: 13px;
-  color: oklch(var(--muted-foreground));
-  font-weight: 500;
-}
-
-.pdf-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 10px;
-  background: oklch(var(--surface-alt));
-  border-bottom: 1px solid oklch(var(--border));
-  flex-shrink: 0;
-  min-height: 28px;
-}
-
-.pdf-toolbar-title {
-  font-size: 10.5px;
-  font-weight: 600;
-  color: oklch(var(--muted-foreground));
-  letter-spacing: 0.03em;
-}
-
-.pdf-legend-inline {
-  display: flex;
-  align-items: center;
-  gap: 2px 8px;
-  flex-wrap: wrap;
-  font-size: 10px;
-  color: oklch(var(--muted-foreground));
-}
-
-.leg-dot {
-  display: inline-block;
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-  margin: 0 2px 0 6px;
-  vertical-align: middle;
+  color: #999;
+  font-size: 14px;
 }

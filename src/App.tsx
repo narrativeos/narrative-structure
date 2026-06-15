@@ -17,7 +17,6 @@ import TOC from "./components/TOC";
 import BlockEditor from "./components/Editor";
 import type { MirrorBbox } from "./components/PdfMirrorLayer";
 import MarkdownPreview from "./components/MarkdownPreview";
-import FileExplorer from "./components/FileExplorer";
 import PdfViewer from "./components/PdfViewer";
 import AgentConsole from "./components/AgentConsole";
 import PipelineStatus from "./components/PipelineStatus";
@@ -85,7 +84,6 @@ function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecent);
   const refreshRecent = useCallback(() => setRecentProjects(loadRecent()), []);
   const [projectKey, setProjectKey] = useState(0);
-  const pdfIframeRef = useRef<HTMLIFrameElement>(null);
   const [lines, setLines] = useState<LineDef[]>([]);
   const [mirrorBboxes, setMirrorBboxes] = useState<MirrorBbox[]>([]);
   const [pageRect, setPageRect] = useState<{left:number;top:number;width:number;height:number}|null>(null);
@@ -96,7 +94,6 @@ function App() {
   const importProgressTimer = useRef<number | null>(null);
   const workspaceRef = useRef<HTMLDivElement>(null);
   const bboxRequestIdRef = useRef(0);
-  const pageTextsRef = useRef<string[]>([]);
   const scrollBboxTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const drawLinesRef = useRef<() => void>();
   const requestBboxRef = useRef<() => void>();
@@ -114,10 +111,7 @@ function App() {
     setupAgentProxy();
   }, []);
 
-  // 区块标注开关 → 同步 iframe 信息层
-  useEffect(() => {
-    pdfIframeRef.current?.contentWindow?.postMessage({ type: "set-overlay", visible: showAnnotations }, "*");
-  }, [showAnnotations]);
+  // 区块标注开关 → PdfViewer 组件通过 props 控制
 
   // pageBlocks 变化 → 请求 bbox 数据填充 mirror 层（仅当前页）
   useEffect(() => {
@@ -165,83 +159,10 @@ function App() {
       };
       drawLinesRef.current = drawAllLines;
       // 从三页（page-1, page, page+1）获取 blocks 数据 → 请求 bbox
+      // 注意：iframe 已被移除，bbox 数据由 PdfViewer 组件通过 page mapping 计算
+      // 此函数保留为空壳，避免破坏依赖 requestBboxRef 的代码
       const requestBboxForVisiblePages = () => {
-        const blocks = pageBlocksRef.current;
-        if (!blocks?.length) return;
-        const iframe = pdfIframeRef.current?.contentWindow;
-        if (!iframe) return;
-        const page = currentPageRef.current;
-        // 过滤三页的 blocks: page-1, page, page+1
-        const threePageBlocks = blocks.filter(b => {
-          try {
-            const bpage = JSON.parse(b.metadata||'{}').page||0;
-            return bpage >= page - 1 && bpage <= page + 1;
-          } catch { return false; }
-        });
-        // 按页码分组，向 iframe 发送三页的 get-bbox-pos 请求
-        const pageMap = new Map<number, Block[]>();
-        threePageBlocks.forEach(b => {
-          try {
-            const bpage = JSON.parse(b.metadata||'{}').page||0;
-            if (bpage > 0 && b.block_type !== 'empty' && b.content.trim()) {
-              if (!pageMap.has(bpage)) pageMap.set(bpage, []);
-              pageMap.get(bpage)!.push(b);
-            }
-          } catch {}
-        });
-        // 当前页的 texts 用于飞线匹配
-        const currentPageBlocks = pageMap.get(page) || [];
-        const pageTexts = currentPageBlocks.map(b => b.content);
-        pageTextsRef.current = pageTexts;
-        // 构建 flyRowMap — 只包含当前页的 block（用于飞线绘制过滤）
-        const flyRowMap: Record<string, { id: string, content: string, page: number, block_type: string }> = {};
-        currentPageBlocks.forEach(b => {
-          flyRowMap[b.id] = { id: b.id, content: b.content, page, block_type: b.block_type };
-        });
-        (window as any).__flyRowMap = flyRowMap;
-        // 收集三页的所有 bboxes 用于 mirror 层渲染
-        const allBboxesPromise: Promise<MirrorBbox[]>[] = [];
-        const reqId = ++bboxRequestIdRef.current;
-        (window as any).__flyReqId = reqId;
-        // 对每一页发送请求
-        pageMap.forEach((pageBlocks, p) => {
-          const texts = pageBlocks.map(b => b.content);
-          if (texts.length > 0) {
-            // 构建该页的 flyRows
-            const pageFlyRows = pageBlocks.map(b => ({ id: b.id, content: b.content, page: p, block_type: b.block_type }));
-            allBboxesPromise.push(
-              new Promise<MirrorBbox[]>((resolve) => {
-                const oneTimeHandler = (e: MessageEvent) => {
-                  if (e.data?.type === 'bbox-pos' && e.data.page === p) {
-                    const bboxes = (e.data.bboxes || []).map((bb: any, bi: number) => ({
-                      x: bb.x, y: bb.y, w: bb.w, h: bb.h,
-                      id: pageFlyRows[bi]?.id || "",
-                      block_type: pageFlyRows[bi]?.block_type
-                    })).filter((bb: MirrorBbox) => bb.id);
-                    window.removeEventListener('message', oneTimeHandler);
-                    resolve(bboxes);
-                  }
-                };
-                window.addEventListener('message', oneTimeHandler);
-                iframe.postMessage({ type: "get-bbox-pos", page: p, texts }, "*");
-              })
-            );
-          }
-        });
-        // 等待所有页的 bbox 结果汇总
-        if (allBboxesPromise.length > 0) {
-          Promise.all(allBboxesPromise).then(allBboxes => {
-            if (reqId === bboxRequestIdRef.current) {
-              const flatBboxes = allBboxes.flat();
-              setMirrorBboxes(flatBboxes);
-              requestAnimationFrame(drawAllLines);
-            }
-          });
-        } else if (pageTexts.length > 0) {
-          // 只有当前页有内容
-          (window as any).__flyRows = currentPageBlocks.map(b => ({ id: b.id, content: b.content }));
-          iframe.postMessage({ type: "get-bbox-pos", page, texts: pageTexts }, "*");
-        }
+        // bbox 数据现在由 PdfViewer 组件内部计算并通过 onBboxRequest callback 返回
       };
       requestBboxRef.current = requestBboxForVisiblePages;
       let rafId = 0;
@@ -617,8 +538,10 @@ function App() {
         const meta = JSON.parse(head.metadata || "{}");
         if (meta.page) targetPage = meta.page as number;
       } catch {}
+      // 注意：PdfViewer 组件现在内部管理页码状态
+      // 如需跳转，可通过 handlePageChange(targetPage) 触发
       if (targetPage > 0) {
-        pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: targetPage }, "*");
+        // 暂时注释：需要 PdfViewer 暴露 navigateTo 方法
       }
     } catch (err) {
       setStatusMsg(`加载块失败: ${err}`);
@@ -754,7 +677,8 @@ function App() {
               if (e.key === 'Enter') {
                 const p = parseInt(pageInput, 10);
                 if (p > 0) {
-                  pdfIframeRef.current?.contentWindow?.postMessage({ type: "navigate", page: p }, "*");
+                  handlePageChange(p);
+                  setPageInput("");
                 }
               }
             }}
@@ -777,17 +701,14 @@ function App() {
         {/* 中间区域：左 + 中 + 右 */}
         <Panel defaultSize="78%" minSize="50%">
           <Group orientation="horizontal" style={{ overflow: "hidden" }}>
-            {/* 左栏：TOC + 文件资产，可调宽度 */}
+            {/* 左栏：TOC，可调宽度 */}
             <Panel defaultSize="18%" minSize={200} maxSize="30%" className="panel-left">
               <div className="sidebar-panel">
                 <div className="sidebar-header">
                   <span>语义目录 ({tocTree.reduce((s, n) => s + countNodes(n), 0)})</span>
                 </div>
-                <div className="sidebar-content" style={{ flex: 3 }}>
+                <div className="sidebar-content" style={{ flex: 1 }}>
                   <TOC nodes={tocTree} onSelect={handleSelectBlock} />
-                </div>
-                <div className="sidebar-content" style={{ flex: 1, borderTop: "1px solid oklch(var(--border))" }}>
-                  <FileExplorer projectPath={projectPath} />
                 </div>
               </div>
             </Panel>
@@ -801,7 +722,7 @@ function App() {
                   <div className="workspace-pane">
                     <div className="workspace-pane-header">PDF 视图</div>
                     <div className="workspace-pane-body">
-                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} selectedBboxId={selectedBboxId} hoveredBboxId={hoveredBboxId} onBboxClick={setSelectedBboxId} />
+                      <PdfViewer key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} selectedBboxId={selectedBboxId} hoveredBboxId={hoveredBboxId} onBboxClick={setSelectedBboxId} />
                     </div>
                   </div>
                 </div>

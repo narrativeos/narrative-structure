@@ -2,10 +2,38 @@ pub mod project_manager;
 pub mod db_engine;
 pub mod markdown_parser;
 pub mod page_mapper;
+pub mod ocr_adapter;
 pub mod mcp;
+pub mod pdf_render;
 
 use project_manager::ProjectState;
 use tauri::http::{Request, Response, StatusCode};
+
+// 内嵌 PDF.js（离线可用）
+const PDF_JS: &str = include_str!("../assets/pdf.min.js");
+const PDF_WORKER_JS: &str = include_str!("../assets/pdf.worker.min.js");
+
+/// 简单 base64 编码
+fn base64_encode(bytes: &[u8]) -> String {
+    let chars = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    let padding = 3 - (bytes.len() % 3);
+    for chunk in bytes.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).map_or(0, |b| *b as u32);
+        let b2 = chunk.get(2).map_or(0, |b| *b as u32);
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        result.push(chars[((n >> 18) & 0x3F) as usize] as char);
+        result.push(chars[((n >> 12) & 0x3F) as usize] as char);
+        result.push(chars[((n >> 6) & 0x3F) as usize] as char);
+        result.push(chars[(n & 0x3F) as usize] as char);
+    }
+    for _ in 0..padding {
+        result.pop();
+        result.push('=');
+    }
+    result
+}
 
 /// 自定义协议：narrativestructure://localhost/<file_path> 直接提供文件
 fn asset_protocol(
@@ -21,7 +49,23 @@ fn asset_protocol(
     let path = std::path::PathBuf::from(decoded.as_ref());
 
     // 如果是 .pdf 请求，返回内嵌 PDF.js 连续查看器
-    if path.extension().map(|e| e == "pdf").unwrap_or(false) && !uri.contains("raw=1") {
+    // 使用解码后的路径判断扩展名（避免 URL 编码导致匹配失败）
+    let is_pdf = path.extension().map(|e| e == "pdf").unwrap_or(false);
+    let has_raw = uri.contains("raw=1");
+    eprintln!("[asset_protocol] path={} is_pdf={} has_raw={}", decoded, is_pdf, has_raw);
+    if is_pdf && !has_raw {
+        // 读取 PDF 文件内容为 base64
+        let pdf_b64 = if let Ok(mut file) = fs::File::open(&path) {
+            let mut buf = Vec::new();
+            if file.read_to_end(&mut buf).is_ok() {
+                base64_encode(&buf)
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        eprintln!("[asset_protocol] → returning HTML wrapper (size will be ~{} bytes)", PDF_JS.len() + pdf_b64.len() / 4 + 15000);
         let html = format!(r#"<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{{margin:0;background:#525659;overflow:hidden}}
 #toolbar{{position:fixed;top:4px;left:8px;z-index:100;display:flex;gap:6px;align-items:center}}
@@ -61,17 +105,18 @@ body{{margin:0;background:#525659;overflow:hidden}}
   <button onclick="prevPage()" title="上一页">⬆</button>
   <button onclick="nextPage()" title="下一页">⬇</button>
 </div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>{PDF_JS}</script>
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+var workerCode=atob('{worker_b64}');var workerBlob=new Blob([workerCode],{{type:'application/javascript'}});
+pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(workerBlob);
 let pdfDoc=null,currentPage=1,totalPages=0;
-let middleData=null,overlayVisible=true,colorMap={{
-  title:'transparent',text:'transparent',
+let pageMapping=null,overlayVisible=true,colorMap={{
+  heading:'transparent',text:'transparent',
   interline_equation:'transparent',table:'transparent',
   image:'transparent'
 }};
 let borderMap={{
-  title:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',
+  heading:'#ef4444',text:'#3b82f6',interline_equation:'#10b981',
   table:'#f59e0b',image:'#8b5cf6'
 }};
 let highlightedTexts=null;
@@ -99,39 +144,42 @@ function toggleOverlay(){{
   window.parent.postMessage({{type:'overlay-toggled',visible:overlayVisible}},'*');
 }}
 
+function getPageByNum(pageNum){{
+  if(!pageMapping||!pageMapping.pages)return null;
+  return pageMapping.pages[pageNum-1]||null;
+}}
+
 function drawOverlay(canvas,pageNum){{
-  if(!middleData||!overlayVisible)return;
-  var page=middleData[pageNum-1];
-  if(!page||!page.para_blocks)return;
+  if(!pageMapping||!overlayVisible)return;
+  var page=getPageByNum(pageNum);
+  if(!page||!page.blocks)return;
   var ctx=canvas.getContext('2d');
   var pw=page.page_size[0],ph=page.page_size[1];
   var sx=canvas.width/pw,sy=canvas.height/ph;
-  page.para_blocks.forEach(function(b){{
+  page.blocks.forEach(function(b){{
     var bbox=b.bbox;
     var x=bbox[0]*sx,y=bbox[1]*sy,w=(bbox[2]-bbox[0])*sx,h=(bbox[3]-bbox[1])*sy;
-    var fill=colorMap[b.type]||'rgba(128,128,128,0.15)';
-    var stroke=borderMap[b.type]||'#888';
+    var fill=colorMap[b.block_type]||'rgba(128,128,128,0.15)';
+    var stroke=borderMap[b.block_type]||'#888';
     ctx.fillStyle=fill;ctx.strokeStyle=stroke;ctx.lineWidth=0.5;
     ctx.fillRect(x,y,w,h);ctx.strokeRect(x,y,w,h);
     // 小标签
     if(w>40&&h>12){{
       ctx.fillStyle=stroke;ctx.font='9px sans-serif';
-      ctx.fillText(b.type,x+2,y+11);
+      ctx.fillText(b.block_type,x+2,y+11);
     }}
   }});
   drawHighlight(ctx,page,sx,sy,pageNum);
 }}
 
 function drawHighlight(ctx,page,sx,sy,pageNum){{
-if(!highlightedTexts||!highlightedTexts.length||!page||!page.para_blocks)return;
+if(!highlightedTexts||!highlightedTexts.length||!page||!page.blocks)return;
 if(pageNum!==currentPage)return;
-var pb,i,j,k,hc,sc,sb,hx,hy,hw,hh;
-for(i=0;i<page.para_blocks.length;i++){{
-pb=page.para_blocks[i];if(!pb.lines)continue;
-for(j=0;j<pb.lines.length;j++){{
-var l=pb.lines[j];if(!l.spans)continue;
-for(k=0;k<l.spans.length;k++){{
-var s=l.spans[k];sc=(s.content||'').replace(/\\s+/g,'');
+var block,i,k,hc,sc,sb,hx,hy,hw,hh;
+for(i=0;i<page.blocks.length;i++){{
+var block=page.blocks[i];if(!block.spans||!block.spans.length)continue;
+for(k=0;k<block.spans.length;k++){{
+var s=block.spans[k];sc=(s.content||'').replace(/\\s+/g,'');
 for(var hi=0;hi<highlightedTexts.length;hi++){{
 hc=highlightedTexts[hi].replace(/\\s+/g,'');
 if(sc&&hc&&sc.length>2&&hc.length>2&&(sc.indexOf(hc)>=0||hc.indexOf(sc)>=0)){{
@@ -145,12 +193,15 @@ ctx.fillRect(hx-1,hy-1,hw+2,hh+2);
 }}
 }}
 }}
-}}
-}}
 
 
 
-pdfjsLib.getDocument('{pdf_url}').promise.then(function(pdf){{
+// 使用内嵌的 PDF 数据（base64 解码为 ArrayBuffer）
+var pdfB64='{pdf_b64}';
+var pdfBin=atob(pdfB64);
+var pdfBytes=new Uint8Array(pdfBin.length);
+for(var i=0;i<pdfBin.length;i++){{pdfBytes[i]=pdfBin.charCodeAt(i);}}
+pdfjsLib.getDocument({{data:pdfBytes.buffer}}).promise.then(function(pdf){{
 pdfDoc=pdf;totalPages=pdf.numPages;
 pdfDoc.getPage(1).then(function(p){{
 var v=p.getViewport({{scale:1}});
@@ -159,6 +210,9 @@ pageHeight=v.height*(pageWidth/v.width);
 showPage(1);
 }});
 document.getElementById('indicator').textContent='1 / '+totalPages;
+}}).catch(function(err){{
+console.error('PDF.js: Failed to load PDF:',err);
+document.getElementById('indicator').textContent='ERROR: '+err.message;
 }});
 function createPageWrap(num){{
 var wrap=document.createElement('div');
@@ -254,8 +308,8 @@ showPage(currentPage);
 }});
 window.addEventListener('message',function(e){{
 if(e.data&&e.data.type==='navigate')showPage(e.data.page);
-if(e.data&&e.data.type==='middle-data'){{
-middleData=e.data.data;renderPage(currentPage);
+if(e.data&&e.data.type==='page-mapping-data'){{
+pageMapping=e.data.data;renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='highlight-bbox'){{
 highlightedTexts=e.data.texts||null;renderPage(currentPage);
@@ -271,21 +325,19 @@ renderPage(currentPage);
 }}
 if(e.data&&e.data.type==='get-bbox-pos'){{
 var pgEl=document.getElementById('page-'+e.data.page);
-if(!pgEl||!middleData)return;
-var pd=middleData[e.data.page-1];
+if(!pgEl||!pageMapping)return;
+var pd=getPageByNum(e.data.page);
 if(!pd||!pd.page_size)return;
 var pr=pgEl.getBoundingClientRect();
 var pw=pd.page_size[0],ph=pd.page_size[1];
-// 收集页内所有 span: {{text, bbox, idx}}
-var allSpans=[],bi,li,si;
-for(bi=0;bi<(pd.para_blocks||[]).length;bi++){{
-var pb=pd.para_blocks[bi];
-for(li=0;li<(pb.lines||[]).length;li++){{
-var l=pb.lines[li];
-for(si=0;si<(l.spans||[]).length;si++){{
-var sp=l.spans[si];
+// 收集页内所有 span: {{text, bbox}}
+var allSpans=[];
+for(var bi=0;bi<(pd.blocks||[]).length;bi++){{
+var blk=pd.blocks[bi];
+if(!blk.spans)continue;
+for(var si=0;si<blk.spans.length;si++){{
+var sp=blk.spans[si];
 allSpans.push({{t:(sp.content||'').replace(/\\s+/g,''),b:sp.bbox||[0,0,0,0]}});
-}}
 }}
 }}
 // 最大相似度匹配: 对每个 target text，找页内相似度最高的 span
@@ -314,7 +366,8 @@ window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.
 }}
 }});
 </script></body></html>"#,
-            pdf_url = format!("narrativestructure://localhost/{}?raw=1", path_str)
+            worker_b64 = base64_encode(PDF_WORKER_JS.as_bytes()),
+            pdf_b64 = pdf_b64
         );
         return Response::builder()
             .status(StatusCode::OK)
@@ -366,6 +419,7 @@ pub fn run() {
             project_manager::find_asset_file,
             project_manager::read_file_bytes,
             project_manager::save_screenshot,
+            project_manager::get_page_mapping_json,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,
@@ -377,6 +431,9 @@ pub fn run() {
             db_engine::update_block,
             db_engine::search_blocks,
             db_engine::get_child_count,
+            // PDF rendering with LiteParse
+            pdf_render::render_pdf_pages,
+            pdf_render::get_pdf_page_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NarrativeStructure");

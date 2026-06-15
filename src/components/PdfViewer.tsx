@@ -1,7 +1,19 @@
-import { useEffect, useState, useRef, forwardRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import PdfMirrorLayer, { MirrorBbox } from "./PdfMirrorLayer";
 import "./PdfViewer.css";
+
+export interface PageMappingData {
+  pages: {
+    page_num: number;
+    page_size: [number, number];
+    blocks: {
+      block_type: string;
+      bbox: [number, number, number, number];
+      spans?: { content: string; bbox: [number, number, number, number] }[];
+    }[];
+  }[];
+}
 
 interface PdfViewerProps {
   projectPath: string;
@@ -12,78 +24,286 @@ interface PdfViewerProps {
   selectedBboxId?: string | null;
   hoveredBboxId?: string | null;
   onBboxClick?: (id: string) => void;
+  onBboxRequest?: (page: number, bboxes: MirrorBbox[]) => void;
 }
 
-const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
-  function PdfViewer({ projectPath, onPageChange, mirrorBboxes, pageRect, showAnnotations, selectedBboxId, hoveredBboxId, onBboxClick }, ref) {
-  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+/**
+ * PdfViewer 不再需要前端管理 PDF 路径。
+ * PDF 路径由后端从当前打开的项目自动获取（搜索 *_origin.pdf）。
+ */
+
+interface PageImage {
+  page_num: number;
+  width: number;
+  height: number;
+  image_base64: string;
+}
+
+const PdfViewer = ({
+  projectPath,
+  onPageChange,
+  mirrorBboxes,
+  pageRect,
+  showAnnotations,
+  selectedBboxId,
+  hoveredBboxId,
+  onBboxClick,
+  onBboxRequest,
+}: PdfViewerProps) => {
+  const [totalPages, setTotalPages] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pages, setPages] = useState<Record<number, PageImage>>({});
   const [loading, setLoading] = useState(true);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [loadingMsg, setLoadingMsg] = useState("加载 PDF...");
+  const [pageMapping, setPageMapping] = useState<PageMappingData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // 合并外部 ref 和内部 ref
-  const setRef = useCallback((el: HTMLIFrameElement | null) => {
-    (iframeRef as React.MutableRefObject<HTMLIFrameElement | null>).current = el;
-    if (typeof ref === "function") ref(el);
-    else if (ref) (ref as React.MutableRefObject<HTMLIFrameElement | null>).current = el;
-  }, [ref]);
+  // 从 page mapping 计算 bbox 位置
+  const calculateBboxes = useCallback((
+    pageNum: number,
+    img: PageImage,
+    mapping: PageMappingData
+  ): MirrorBbox[] => {
+    const pageData = mapping.pages.find((p) => p.page_num === pageNum);
+    if (!pageData) return [];
 
-  // 加载 PDF + _middle.json 数据
-  useEffect(() => {
-    setLoading(true);
-    setPdfUrl(null);
-    Promise.all([
-      invoke<string | null>("find_asset_file", { pattern: "_origin.pdf" }),
-      invoke<string | null>("find_asset_file", { pattern: "_middle.json" }),
-    ]).then(([pdfPath, middlePath]) => {
-      if (pdfPath) setPdfUrl(`narrativestructure://localhost/${encodeURIComponent(pdfPath)}?t=${Date.now()}`);
-      // 存储 middle.json 路径，等 iframe 加载后发送
-      if (middlePath) {
-        (window as any).__middleJsonPath = middlePath;
+    const [origWidth, origHeight] = pageData.page_size;
+    const scaleX = img.width / origWidth;
+    const scaleY = img.height / origHeight;
+
+    const bboxes: MirrorBbox[] = [];
+    pageData.blocks.forEach((block, idx) => {
+      if (block.block_type === 'empty') return;
+      const [x1, y1, x2, y2] = block.bbox;
+      bboxes.push({
+        x: x1 * scaleX,
+        y: y1 * scaleY,
+        w: (x2 - x1) * scaleX,
+        h: (y2 - y1) * scaleY,
+        id: `block-${pageNum}-${idx}`,
+        block_type: block.block_type,
+      });
+    });
+
+    return bboxes;
+  }, []);
+
+  // 加载指定范围的页面（PDF 路径由后端自动获取）
+  const loadPageRange = useCallback(
+    async (page: number, total: number) => {
+      const start = Math.max(1, page - 1);
+      const end = Math.min(total, page + 1);
+      const pageNumbers = [];
+      for (let i = start; i <= end; i++) {
+        pageNumbers.push(i);
       }
-      setLoading(false);
-    }).catch(() => setLoading(false));
-  }, [projectPath]);
 
-  // 监听 iframe 加载完成 → 发送 _middle.json 数据
+      try {
+        setLoadingMsg(`渲染页面 ${start}-${end}...`);
+        const newPages = await invoke<PageImage[]>("render_pdf_pages", {
+          PageNumbers: pageNumbers,
+          Dpi: 150,
+        });
+
+        setPages((prev) => {
+          const updated = { ...prev };
+          newPages.forEach((p) => {
+            updated[p.page_num] = p;
+          });
+          return updated;
+        });
+
+        // 请求 bbox 数据
+        if (onBboxRequest) {
+          const img = newPages.find((p) => p.page_num === page);
+          if (img && pageMapping) {
+            const bboxes = calculateBboxes(page, img, pageMapping);
+            onBboxRequest(page, bboxes);
+          }
+        }
+      } catch (err) {
+        console.error("[PdfViewer] Failed to load pages:", err);
+        setError(`渲染页面失败: ${err}`);
+      }
+    },
+    [pageMapping, onBboxRequest, calculateBboxes]
+  );
+
+  // 加载页数和 page mapping（PDF 路径由后端自动获取）
   useEffect(() => {
-    if (!pdfUrl) return;
-    const iframe = iframeRef.current;
-    if (!iframe) return;
+    // 没有项目路径时不初始化（等待项目打开）
+    if (!projectPath) {
+      return;
+    }
 
-    const onLoad = () => {
-      const middlePath = (window as any).__middleJsonPath;
-      if (!middlePath) return;
+    setLoading(true);
+    setError(null);
+    setLoadingMsg("加载 PDF...");
+    setPages({});
+    setCurrentPage(1);
 
-      // 通过 narrativestructure 协议读取 _middle.json
-      const url = `narrativestructure://localhost/${encodeURIComponent(middlePath)}?raw=1`;
-      fetch(url)
-        .then(r => r.json())
-        .then(data => {
-          iframe.contentWindow?.postMessage({ type: "middle-data", data: data.pdf_info }, "*");
-        })
-        .catch(() => {});
-    };
+    // 设置超时（使用 ref 来追踪是否已完成）
+    const completedRef = { value: false };
+    const timeout = setTimeout(() => {
+      if (!completedRef.value) {
+        setLoading(false);
+        setError("加载超时（3分钟），PDF 文件可能过大或格式不支持");
+      }
+    }, 180000); // 180秒超时（后端渲染超时 120秒）
 
-    iframe.addEventListener("load", onLoad);
-    return () => iframe.removeEventListener("load", onLoad);
-  }, [pdfUrl]);
+    Promise.all([
+      invoke<number>("get_pdf_page_count"),
+      invoke<string | null>("get_page_mapping_json"),
+    ])
+      .then(async ([count, mappingJson]) => {
+        // 解析 page mapping
+        if (mappingJson) {
+          try {
+            const mapping = JSON.parse(mappingJson);
+            setPageMapping(mapping);
+          } catch (e) {
+            console.error("[PdfViewer] Failed to parse page mapping:", e);
+          }
+        }
 
-  // 监听 PDF 翻页事件
+        setTotalPages(count);
+
+        // 加载初始页面 (1, 2, 3)
+        setLoadingMsg("渲染页面...");
+        await loadPageRange(1, count);
+        clearTimeout(timeout);
+        completedRef.value = true;
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error("[PdfViewer] Failed to initialize:", e);
+        clearTimeout(timeout);
+        completedRef.value = true;
+        setLoading(false);
+        setError(`初始化失败: ${e}`);
+      });
+  }, [projectPath, loadPageRange]);
+
+  // 翻页处理
+  const goToPage = useCallback(
+    (page: number) => {
+      if (page < 1 || page > totalPages) return;
+      setCurrentPage(page);
+      onPageChange?.(page);
+      loadPageRange(page, totalPages);
+    },
+    [currentPage, totalPages, onPageChange, loadPageRange]
+  );
+
+  // 键盘翻页
   useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === "pdf-page") onPageChange?.(e.data.page);
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") {
+        e.preventDefault();
+        goToPage(currentPage + 1);
+      }
+      if (e.key === "ArrowUp" || e.key === "PageUp") {
+        e.preventDefault();
+        goToPage(currentPage - 1);
+      }
+      if (e.key === "Home") {
+        e.preventDefault();
+        goToPage(1);
+      }
+      if (e.key === "End") {
+        e.preventDefault();
+        goToPage(totalPages);
+      }
     };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
-  }, [onPageChange]);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [currentPage, totalPages, goToPage]);
 
-  if (loading) return <div className="pdf-empty">⏳ 加载 PDF...</div>;
-  if (!pdfUrl) return <div className="pdf-empty">（未找到 PDF）</div>;
+  // 鼠标滚轮翻页
+  useEffect(() => {
+    let wheelTimer: any = null;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => {
+        if (e.deltaY > 30) goToPage(currentPage + 1);
+        else if (e.deltaY < -30) goToPage(currentPage - 1);
+      }, 80);
+    };
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener("wheel", handler, { passive: false });
+    }
+    return () => {
+      if (container) {
+        container.removeEventListener("wheel", handler);
+      }
+    };
+  }, [currentPage, totalPages, goToPage]);
+
+  // 显示错误
+  if (error) {
+    return (
+      <div className="pdf-empty" style={{ flexDirection: "column", gap: "10px", padding: "20px" }}>
+        <span>❌ {error}</span>
+        <span style={{ fontSize: "12px", color: "#888" }}>
+          提示：对于超大 PDF（如单页超过 10000 行），建议使用 PDF.js iframe 方式查看
+        </span>
+      </div>
+    );
+  }
+
+  if (loading) return <div className="pdf-empty">⏳ {loadingMsg}</div>;
+  if (totalPages === 0) return <div className="pdf-empty">（未找到 PDF）</div>;
+
+  // 获取当前页和相邻页的图片
+  const prevPage = pages[currentPage - 1];
+  const currPage = pages[currentPage];
+  const nextPage = pages[currentPage + 1];
 
   return (
-    <div className="pdf-viewer">
+    <div className="pdf-viewer" ref={containerRef}>
       <div className="pdf-content">
-        <iframe ref={setRef} src={pdfUrl} className="pdf-embed" title="PDF Preview" />
+        <div className="page-stage">
+          {/* 上一页 */}
+          {currentPage > 1 && prevPage && (
+            <div className="page-wrap prev-page" id={`page-${currentPage - 1}`}>
+              <img
+                src={`data:image/png;base64,${prevPage.image_base64}`}
+                alt={`Page ${currentPage - 1}`}
+                style={{ width: "100%", height: "auto" }}
+              />
+              <div className="page-num">p{currentPage - 1}</div>
+            </div>
+          )}
+
+          {/* 当前页 */}
+          {currPage && (
+            <div className="page-wrap current-page" id={`page-${currentPage}`}>
+              <img
+                src={`data:image/png;base64,${currPage.image_base64}`}
+                alt={`Page ${currentPage}`}
+                style={{ width: "100%", height: "auto" }}
+              />
+              <div className="page-num">p{currentPage}</div>
+            </div>
+          )}
+
+          {/* 下一页 */}
+          {currentPage < totalPages && nextPage && (
+            <div className="page-wrap next-page" id={`page-${currentPage + 1}`}>
+              <img
+                src={`data:image/png;base64,${nextPage.image_base64}`}
+                alt={`Page ${currentPage + 1}`}
+                style={{ width: "100%", height: "auto" }}
+              />
+              <div className="page-num">p{currentPage + 1}</div>
+            </div>
+          )}
+        </div>
+
+        {/* 标注层 */}
         <PdfMirrorLayer
           bboxes={mirrorBboxes || []}
           pageRect={pageRect}
@@ -93,8 +313,23 @@ const PdfViewer = forwardRef<HTMLIFrameElement, PdfViewerProps>(
           onBboxClick={onBboxClick}
         />
       </div>
+
+      {/* 页码指示器 */}
+      <div className="page-indicator">
+        {currentPage} / {totalPages}
+      </div>
+
+      {/* 翻页按钮 */}
+      <div className="nav-buttons">
+        <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage <= 1}>
+          ⬆
+        </button>
+        <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage >= totalPages}>
+          ⬇
+        </button>
+      </div>
     </div>
   );
-});
+};
 
 export default PdfViewer;

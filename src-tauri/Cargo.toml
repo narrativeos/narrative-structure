@@ -23,6 +23,10 @@ zip = "2"
 percent-encoding = "2"
 mime_guess = "2"
 unicode-normalization = "0.1"
+liteparse = "2.0.8"
+base64 = "0.21"
+liteparse-pdfium = "1.1"
+tokio = { version = "1", features = ["time", "macros"] }
 
 # 注意：MCP 功能已内置到 narrative-structure-mcp 独立二进制中，
 # 不再依赖 tauri-plugin-mcp-bridge（该插件已不再维护）
