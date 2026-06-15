@@ -279,15 +279,22 @@ const PdfViewer = ({
   }, [projectPath]);
 
   // 翻页处理 - 使用 ref 读取最新值，避免依赖链不稳定
-  const goToPageRef = useRef<(page: number) => void>((page) => {});
-  goToPageRef.current = (page: number) => {
+  const goToPageRef = useRef<(page: number) => Promise<void>>(async (page) => {});
+  goToPageRef.current = async (page: number) => {
     const total = totalPagesRef.current;
     if (page < 1 || page > total) return;
     setCurrentPage(page);
     onPageChange?.(page);
-    // 按需加载新页范围的 page mapping
-    loadPageMappingRangeRef.current(page, total);
-    loadPageRangeRef.current(page, total);
+    setLoading(true);
+    setLoadingMsg("加载页面...");
+    try {
+      // 先加载 page mapping
+      await loadPageMappingRangeRef.current(page, total);
+      // 再加载页面图片
+      await loadPageRangeRef.current(page, total);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const goToPage = (page: number) => goToPageRef.current(page);
