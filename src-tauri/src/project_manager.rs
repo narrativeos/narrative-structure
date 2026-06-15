@@ -55,6 +55,7 @@ END;
 pub struct ProjectState {
     pub db_conn: Mutex<Option<Connection>>,
     pub project_path: Mutex<Option<PathBuf>>,
+    pub page_mapping: Mutex<Option<ocr_adapter::PageMapping>>,
 }
 
 impl Default for ProjectState {
@@ -68,6 +69,7 @@ impl ProjectState {
         Self {
             db_conn: Mutex::new(None),
             project_path: Mutex::new(None),
+            page_mapping: Mutex::new(None),
         }
     }
 }
@@ -503,7 +505,7 @@ fn open_project_inner(
     let migrate_time = start.elapsed() - migrate_start;
     eprintln!("[PERF] open_project: 迁移检查 = {:.3}ms", migrate_time.as_secs_f64() * 1000.0);
 
-    // 6. 更新全局状态
+    // 6. 更新全局状态，清空旧缓存
     {
         let mut conn_guard = state.db_conn.lock().map_err(|e| e.to_string())?;
         *conn_guard = Some(conn);
@@ -511,6 +513,11 @@ fn open_project_inner(
     {
         let mut path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
         *path_guard = Some(project_path.clone());
+    }
+    // 清空 page_mapping 缓存（新打开的项目需要重新加载）
+    {
+        let mut mapping_guard = state.page_mapping.lock().map_err(|e| e.to_string())?;
+        *mapping_guard = None;
     }
     
     let total_time = start.elapsed();
@@ -531,6 +538,12 @@ pub fn close_project(state: tauri::State<'_, ProjectState>) -> Result<String, St
     // 清除 PDF 缓存
     if let Some(ref p) = prev_path {
         pdf_render::clear_project_cache(&p.display().to_string());
+    }
+
+    // 清空 page_mapping 缓存
+    {
+        let mut mapping_guard = state.page_mapping.lock().map_err(|e| e.to_string())?;
+        *mapping_guard = None;
     }
 
     match prev_path {
@@ -1065,6 +1078,34 @@ fn build_metadata_json(
     format!("{{\"page\":{}}}", page)
 }
 
+/// 从缓存加载 PageMapping，未命中则从磁盘加载并缓存
+fn get_or_load_page_mapping(
+    state: &tauri::State<'_, ProjectState>,
+    assets_dir: &Path,
+) -> Result<ocr_adapter::PageMapping, String> {
+    // 先尝试从缓存读取
+    {
+        let mapping_guard = state.page_mapping.lock().map_err(|e| e.to_string())?;
+        if let Some(ref mapping) = *mapping_guard {
+            return Ok(mapping.clone());
+        }
+    }
+
+    // 缓存未命中，从磁盘加载
+    let source = ocr_adapter::detect_ocr_source(assets_dir)
+        .ok_or("未检测到 OCR 数据源")?;
+    let adapter = ocr_adapter::create_adapter(&source);
+    let mapping = adapter.load_page_mapping(assets_dir)?;
+
+    // 写入缓存
+    {
+        let mut mapping_guard = state.page_mapping.lock().map_err(|e| e.to_string())?;
+        *mapping_guard = Some(mapping.clone());
+    }
+
+    Ok(mapping)
+}
+
 /// 获取当前项目的 PageMapping JSON（供前端 PDF viewer 使用，使用全局项目状态）
 #[tauri::command]
 pub fn get_page_mapping_json(
@@ -1074,12 +1115,7 @@ pub fn get_page_mapping_json(
     let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
     let assets_dir = project_path.join("assets");
 
-    // 检测 OCR 数据源
-    let source = ocr_adapter::detect_ocr_source(&assets_dir)
-        .ok_or("未检测到 OCR 数据源")?;
-    
-    let adapter = ocr_adapter::create_adapter(&source);
-    let mapping = adapter.load_page_mapping(&assets_dir)?;
+    let mapping = get_or_load_page_mapping(&state, &assets_dir)?;
 
     // 序列化为 JSON
     let json = serde_json::to_string(&mapping_to_serializable(&mapping))
@@ -1099,11 +1135,7 @@ pub fn get_page_mapping_range(
     let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
     let assets_dir = project_path.join("assets");
 
-    let source = ocr_adapter::detect_ocr_source(&assets_dir)
-        .ok_or("未检测到 OCR 数据源")?;
-    
-    let adapter = ocr_adapter::create_adapter(&source);
-    let mapping = adapter.load_page_mapping(&assets_dir)?;
+    let mapping = get_or_load_page_mapping(&state, &assets_dir)?;
 
     // 只序列化指定页范围
     let page_start_u32 = page_start as u32;
