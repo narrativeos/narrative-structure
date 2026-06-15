@@ -238,7 +238,7 @@ const PdfViewer = ({
       loadPageMappingRange(page, totalPages);
       loadPageRange(page, totalPages);
     },
-    [currentPage, totalPages, onPageChange, loadPageRange, loadPageMappingRange]
+    [totalPages, onPageChange, loadPageRange, loadPageMappingRange]
   );
 
   // 键盘翻页
