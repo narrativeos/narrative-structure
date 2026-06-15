@@ -63,8 +63,10 @@ const PdfViewer = ({
   // 使用 refs 存储最新值，避免 useCallback 依赖链不稳定导致无限重渲染
   const currentPageRef = useRef(currentPage);
   const totalPagesRef = useRef(totalPages);
+  const pageMappingRef = useRef(pageMapping);
   currentPageRef.current = currentPage;
   totalPagesRef.current = totalPages;
+  pageMappingRef.current = pageMapping;
 
   // LRU 清理：保留当前页 ±5 页，清除超出范围的旧图片
   const evictOldPages = useCallback((currPage: number) => {
@@ -116,50 +118,87 @@ const PdfViewer = ({
     return bboxes;
   }, []);
 
+  // 使用 refs 存储 props，避免 useCallback 依赖不稳定
+  const onBboxRequestRef = useRef(onBboxRequest);
+  onBboxRequestRef.current = onBboxRequest;
+
   // 加载指定范围的页面（PDF 路径由后端自动获取）
-  const loadPageRange = useCallback(
-    async (page: number, total: number) => {
-      const start = Math.max(1, page - 1);
-      const end = Math.min(total, page + 1);
-      const pageNumbers: number[] = [];
-      for (let i = start; i <= end; i++) {
-        pageNumbers.push(i);
-      }
+  // 空依赖数组：所有外部值通过 refs 读取
+  const loadPageRange = useCallback(async (page: number, total: number) => {
+    const start = Math.max(1, page - 1);
+    const end = Math.min(total, page + 1);
+    const pageNumbers: number[] = [];
+    for (let i = start; i <= end; i++) {
+      pageNumbers.push(i);
+    }
 
-      try {
-        setLoadingMsg(`渲染页面 ${start}-${end}...`);
-        const newPages = await invoke<PageImage[]>("render_pdf_pages", {
-          PageNumbers: pageNumbers,
-          Dpi: 150,
+    try {
+      setLoadingMsg(`渲染页面 ${start}-${end}...`);
+      const newPages = await invoke<PageImage[]>("render_pdf_pages", {
+        PageNumbers: pageNumbers,
+        Dpi: 150,
+      });
+
+      setPages((prev) => {
+        const updated = { ...prev };
+        newPages.forEach((p) => {
+          updated[p.page_num] = p;
+          loadedPagesRef.current.add(p.page_num);
         });
+        return updated;
+      });
 
-        setPages((prev) => {
-          const updated = { ...prev };
-          newPages.forEach((p) => {
-            updated[p.page_num] = p;
-            loadedPagesRef.current.add(p.page_num);
-          });
-          return updated;
+      // LRU 清理
+      const totalP = totalPagesRef.current;
+      const keepRange = 5;
+      const minKeep = Math.max(1, page - keepRange);
+      const maxKeep = totalP > 0 ? Math.min(totalP, page + keepRange) : page + keepRange;
+      setPages((prev) => {
+        const updated = { ...prev };
+        let evicted = false;
+        loadedPagesRef.current.forEach((pageNum) => {
+          if (pageNum < minKeep || pageNum > maxKeep) {
+            delete updated[pageNum];
+            loadedPagesRef.current.delete(pageNum);
+            evicted = true;
+          }
         });
+        return evicted ? updated : prev;
+      });
 
-        // LRU 清理：加载新页面后清除超出范围的旧图片
-        evictOldPages(page);
-
-        // 请求 bbox 数据
-        if (onBboxRequest) {
-          const img = newPages.find((p) => p.page_num === page);
-          if (img && pageMapping) {
-            const bboxes = calculateBboxes(page, img, pageMapping);
-            onBboxRequest(page, bboxes);
+      // 请求 bbox 数据
+      const handler = onBboxRequestRef.current;
+      if (handler) {
+        const img = newPages.find((p) => p.page_num === page);
+        const mapping = pageMappingRef.current;
+        if (img && mapping) {
+          const pageData = mapping.pages.find((p) => p.page_num === page);
+          if (pageData) {
+            const [origWidth, origHeight] = pageData.page_size;
+            const scaleX = img.width / origWidth;
+            const scaleY = img.height / origHeight;
+            const bboxes: MirrorBbox[] = [];
+            pageData.blocks.forEach((block, idx) => {
+              if (block.block_type === 'empty') return;
+              const [x1, y1, x2, y2] = block.bbox;
+              bboxes.push({
+                x: x1 * scaleX,
+                y: y1 * scaleY,
+                w: (x2 - x1) * scaleX,
+                h: (y2 - y1) * scaleY,
+                id: `block-${page}-${idx}`,
+                block_type: block.block_type,
+              });
+            });
+            handler(page, bboxes);
           }
         }
-      } catch (err) {
-        console.error("[PdfViewer] Failed to load pages:", err);
-        setError(`渲染页面失败: ${err}`);
       }
-    },
-    [pageMapping, onBboxRequest, calculateBboxes, evictOldPages]
-  );
+    } catch (err) {
+      console.error("[PdfViewer] Failed to load pages:", err);
+      setError(`渲染页面失败: ${err}`);
+    }
+  }, []);
 
   // 按需加载指定页范围的 page mapping
   const loadPageMappingRange = useCallback(
