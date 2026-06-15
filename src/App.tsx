@@ -102,6 +102,8 @@ function App() {
   const requestBboxRef = useRef<() => void>();
   const [showAnnotations, setShowAnnotations] = useState(true);
   const [showFlyLines, setShowFlyLines] = useState(true);
+  const [selectedBboxId, setSelectedBboxId] = useState<string | null>(null);
+  const [hoveredBboxId, setHoveredBboxId] = useState<string | null>(null);
   const pageReqIdRef = useRef(0);
   const pageBlocksRef = useRef<Block[] | null>(null);
   const [displayPage, setDisplayPage] = useState(1); // 触发 UI 重渲染
@@ -192,9 +194,9 @@ function App() {
         const pageTexts = currentPageBlocks.map(b => b.content);
         pageTextsRef.current = pageTexts;
         // 构建 flyRowMap — 只包含当前页的 block（用于飞线绘制过滤）
-        const flyRowMap: Record<string, { id: string, content: string, page: number }> = {};
+        const flyRowMap: Record<string, { id: string, content: string, page: number, block_type: string }> = {};
         currentPageBlocks.forEach(b => {
-          flyRowMap[b.id] = { id: b.id, content: b.content, page };
+          flyRowMap[b.id] = { id: b.id, content: b.content, page, block_type: b.block_type };
         });
         (window as any).__flyRowMap = flyRowMap;
         // 收集三页的所有 bboxes 用于 mirror 层渲染
@@ -206,14 +208,15 @@ function App() {
           const texts = pageBlocks.map(b => b.content);
           if (texts.length > 0) {
             // 构建该页的 flyRows
-            const pageFlyRows = pageBlocks.map(b => ({ id: b.id, content: b.content, page: p }));
+            const pageFlyRows = pageBlocks.map(b => ({ id: b.id, content: b.content, page: p, block_type: b.block_type }));
             allBboxesPromise.push(
               new Promise<MirrorBbox[]>((resolve) => {
                 const oneTimeHandler = (e: MessageEvent) => {
                   if (e.data?.type === 'bbox-pos' && e.data.page === p) {
                     const bboxes = (e.data.bboxes || []).map((bb: any, bi: number) => ({
                       x: bb.x, y: bb.y, w: bb.w, h: bb.h,
-                      id: pageFlyRows[bi]?.id || ""
+                      id: pageFlyRows[bi]?.id || "",
+                      block_type: pageFlyRows[bi]?.block_type
                     })).filter((bb: MirrorBbox) => bb.id);
                     window.removeEventListener('message', oneTimeHandler);
                     resolve(bboxes);
@@ -264,7 +267,7 @@ function App() {
         if (e.data?.type !== 'bbox-pos' || !e.data.bboxes?.length) return;
         const flyRowMap = (window as any).__flyRowMap || {};
         const rows: any[] = Object.values(flyRowMap);
-        const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "" })).filter((bb: MirrorBbox) => bb.id);
+        const bboxes = e.data.bboxes.map((bb: any, bi: number) => ({ x: bb.x, y: bb.y, w: bb.w, h: bb.h, id: rows[bi]?.id || "", block_type: rows[bi]?.block_type })).filter((bb: MirrorBbox) => bb.id);
         if (e.data.pageRect) setPageRect(e.data.page);
         setMirrorBboxes(bboxes);
         requestAnimationFrame(drawAllLines);
@@ -275,8 +278,8 @@ function App() {
     const onBlockScroll = () => { cancelAnimationFrame(rafId); rafId = requestAnimationFrame(drawAllLines); };
     const timer = setInterval(() => {
       if (!scrollEl) {
-        // ScrollArea 的滚动容器是 .scroll-area-viewport 下的直接子元素
-        const viewport = document.querySelector('[class*="scroll-area"] [style*="overflow"]') || document.querySelector('.page-blocks-scroll > div') || document.querySelector('.page-blocks-list');
+        // 使用 ScrollArea 的 viewport 元素 (data-slot="scroll-area-viewport") 作为滚动容器
+        const viewport = document.querySelector('.page-blocks-scroll [data-slot="scroll-area-viewport"]');
         if (viewport) {
           scrollEl = viewport;
           scrollEl.addEventListener('scroll', onBlockScroll, { passive: true });
@@ -798,7 +801,7 @@ function App() {
                   <div className="workspace-pane">
                     <div className="workspace-pane-header">PDF 视图</div>
                     <div className="workspace-pane-body">
-                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} />
+                      <PdfViewer ref={pdfIframeRef} key={projectKey} projectPath={projectPath} onPageChange={handlePageChange} mirrorBboxes={mirrorBboxes} pageRect={pageRect} showAnnotations={showAnnotations} selectedBboxId={selectedBboxId} hoveredBboxId={hoveredBboxId} onBboxClick={setSelectedBboxId} />
                     </div>
                   </div>
                 </div>
@@ -809,11 +812,10 @@ function App() {
                       <BlockEditor block={activeBlock} pageBlocks={pageBlocks} onChange={handleContentChange} currentPage={displayPage}
                         onBlockToggle={() => { requestAnimationFrame(() => drawLinesRef.current?.()); }}
                         onHoverBlock={(b) => {
-                          const iframe = pdfIframeRef.current?.contentWindow;
                           if (b && b.block_type !== 'empty' && b.content.trim()) {
-                            iframe?.postMessage({ type: "highlight-bbox", texts: [b.content] }, "*");
+                            setHoveredBboxId(b.id);
                           } else {
-                            iframe?.postMessage({ type: "clear-highlight" }, "*");
+                            setHoveredBboxId(null);
                           }
                         }}
                       />
