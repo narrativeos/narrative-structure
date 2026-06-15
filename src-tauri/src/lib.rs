@@ -52,7 +52,6 @@ fn asset_protocol(
     // 使用解码后的路径判断扩展名（避免 URL 编码导致匹配失败）
     let is_pdf = path.extension().map(|e| e == "pdf").unwrap_or(false);
     let has_raw = uri.contains("raw=1");
-    eprintln!("[asset_protocol] path={} is_pdf={} has_raw={}", decoded, is_pdf, has_raw);
     if is_pdf && !has_raw {
         // 读取 PDF 文件内容为 base64
         let pdf_b64 = if let Ok(mut file) = fs::File::open(&path) {
