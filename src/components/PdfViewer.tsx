@@ -56,6 +56,7 @@ const PdfViewer = ({
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState("加载 PDF...");
   const [pageMapping, setPageMapping] = useState<PageMappingData | null>(null);
+  const [pageMappingLoaded, setPageMappingLoaded] = useState(false); // 标记是否已加载完整 mapping
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // LRU: 跟踪已加载的页面，超出窗口范围的自动清理
@@ -200,29 +201,31 @@ const PdfViewer = ({
     }
   }, []);
 
-  // 按需加载指定页范围的 page mapping
+  // 加载完整的 page mapping（一次性加载，缓存到内存）
   const loadPageMappingRange = useCallback(
     async (page: number, total: number) => {
-      const start = Math.max(1, page - 1);
-      const end = Math.min(total, page + 1);
+      // 如果已经加载过完整 mapping，直接跳过
+      if (pageMappingLoaded) {
+        return;
+      }
       try {
-        const mappingJson = await invoke<string | null>("get_page_mapping_range", {
-          PageStart: start,
-          PageEnd: end,
-        });
+        console.log("[PdfViewer] Loading full page mapping...");
+        const mappingJson = await invoke<string | null>("get_page_mapping_json");
         if (mappingJson) {
           try {
             const mapping = JSON.parse(mappingJson);
             setPageMapping(mapping);
+            setPageMappingLoaded(true);
+            console.log("[PdfViewer] Full page mapping loaded, pages:", mapping?.pages?.length);
           } catch (e) {
-            console.error("[PdfViewer] Failed to parse page mapping range:", e);
+            console.error("[PdfViewer] Failed to parse page mapping:", e);
           }
         }
       } catch (e) {
-        console.error("[PdfViewer] Failed to load page mapping range:", e);
+        console.error("[PdfViewer] Failed to load page mapping:", e);
       }
     },
-    []
+    [pageMappingLoaded]
   );
 
   // 使用 refs 存储加载函数，避免 useEffect 依赖不稳定导致重复初始化
@@ -243,6 +246,8 @@ const PdfViewer = ({
     setLoadingMsg("加载 PDF...");
     setPages({});
     setCurrentPage(1);
+    setPageMappingLoaded(false); // 重置 mapping 加载状态
+    setPageMapping(null);
     loadedPagesRef.current.clear();
 
     // 设置超时（使用 ref 来追踪是否已完成）
@@ -282,16 +287,27 @@ const PdfViewer = ({
   const goToPageRef = useRef<(page: number) => Promise<void>>(async (page) => {});
   goToPageRef.current = async (page: number) => {
     const total = totalPagesRef.current;
-    if (page < 1 || page > total) return;
+    if (page < 1 || page > total) {
+      console.log("[PdfViewer] goToPage: page out of range", page, total);
+      return;
+    }
+    console.log("[PdfViewer] goToPage:", page, "total:", total);
     setCurrentPage(page);
     onPageChange?.(page);
     setLoading(true);
-    setLoadingMsg("加载页面...");
+    setLoadingMsg("加载 page mapping...");
     try {
       // 先加载 page mapping
+      console.log("[PdfViewer] Loading page mapping for", page);
       await loadPageMappingRangeRef.current(page, total);
+      console.log("[PdfViewer] Page mapping loaded, now rendering pages");
+      setLoadingMsg("渲染页面...");
       // 再加载页面图片
       await loadPageRangeRef.current(page, total);
+      console.log("[PdfViewer] Pages rendered successfully");
+    } catch (err) {
+      console.error("[PdfViewer] goToPage error:", err);
+      setError(`翻页失败: ${err}`);
     } finally {
       setLoading(false);
     }
