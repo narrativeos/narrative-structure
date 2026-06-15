@@ -14,6 +14,7 @@
   align-items: center;
   justify-content: stretch;
   position: relative;
+  z-index: 0;
 }
 
 .page-stage {
@@ -85,7 +86,8 @@
   padding: 2px 8px;
   border-radius: 3px;
   font-size: 11px;
-  z-index: 100;
+  z-index: 1000;
+  pointer-events: auto;
 }
 
 .nav-buttons {
@@ -96,7 +98,8 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  z-index: 100;
+  z-index: 1000;
+  pointer-events: auto;
 }
 
 .nav-buttons button {
@@ -132,5 +135,9 @@
 .page-wrap.placeholder-page {
   flex: 1 1 auto;
   min-height: 0;
-  pointer-events: none;
+}
+
+/* 加载中占位：相邻页尚未加载时显示 */
+.page-wrap.loading-placeholder {
+  background: #525659;
 }

@@ -312,15 +312,19 @@ const PdfViewer = ({
       <div className="pdf-content">
         <div className="page-stage">
           {/* 上一页 / 上方占位 */}
-          {currentPage > 1 && prevPage ? (
-            <div className="page-wrap prev-page" id={`page-${currentPage - 1}`}>
-              <img
-                src={`data:image/png;base64,${prevPage.image_base64}`}
-                alt={`Page ${currentPage - 1}`}
-                style={{ width: "100%", height: "auto" }}
-              />
-              <div className="page-num">p{currentPage - 1}</div>
-            </div>
+          {currentPage > 1 ? (
+            prevPage ? (
+              <div className="page-wrap prev-page" id={`page-${currentPage - 1}`}>
+                <img
+                  src={`data:image/png;base64,${prevPage.image_base64}`}
+                  alt={`Page ${currentPage - 1}`}
+                  style={{ width: "100%", height: "auto" }}
+                />
+                <div className="page-num">p{currentPage - 1}</div>
+              </div>
+            ) : (
+              <div className="page-wrap prev-page placeholder-page loading-placeholder" />
+            )
           ) : (
             <div className="page-wrap prev-page placeholder-page" />
           )}
@@ -338,15 +342,19 @@ const PdfViewer = ({
           )}
 
           {/* 下一页 / 下方占位 */}
-          {currentPage < totalPages && nextPage ? (
-            <div className="page-wrap next-page" id={`page-${currentPage + 1}`}>
-              <img
-                src={`data:image/png;base64,${nextPage.image_base64}`}
-                alt={`Page ${currentPage + 1}`}
-                style={{ width: "100%", height: "auto" }}
-              />
-              <div className="page-num">p{currentPage + 1}</div>
-            </div>
+          {currentPage < totalPages ? (
+            nextPage ? (
+              <div className="page-wrap next-page" id={`page-${currentPage + 1}`}>
+                <img
+                  src={`data:image/png;base64,${nextPage.image_base64}`}
+                  alt={`Page ${currentPage + 1}`}
+                  style={{ width: "100%", height: "auto" }}
+                />
+                <div className="page-num">p{currentPage + 1}</div>
+              </div>
+            ) : (
+              <div className="page-wrap next-page placeholder-page loading-placeholder" />
+            )
           ) : (
             <div className="page-wrap next-page placeholder-page" />
           )}

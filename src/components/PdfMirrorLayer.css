@@ -4,7 +4,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: 50;
+  z-index: 1;
   /* pointer-events 由组件 inline style 控制 */
   /* 淡入淡出过渡 */
   transition: opacity 0.25s ease;
