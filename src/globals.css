@@ -460,14 +460,14 @@
     transition: background 0.14s ease;
   }
   .resize-handle-h {
-    width: 5px;
+    width: 8px;
     cursor: col-resize;
     position: relative;
   }
   .resize-handle-h::after {
     content: "";
     position: absolute;
-    inset: 20% 2px;
+    inset: 20% 3px;
     border-radius: 999px;
     background: oklch(var(--border));
     transition: background 0.2s;
@@ -477,7 +477,7 @@
     background: oklch(var(--primary));
   }
   .resize-handle-v {
-    height: 5px;
+    height: 8px;
     cursor: row-resize;
     border-top: 1px solid oklch(var(--border));
     background: oklch(var(--surface-alt) / 0.5);

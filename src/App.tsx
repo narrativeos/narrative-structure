@@ -725,7 +725,7 @@ function App() {
             <Separator className="resize-handle resize-handle-h" />
 
             {/* 中栏工作区：PDF | Blocks列表 | Markdown */}
-            <Panel defaultSize="62%">
+            <Panel minSize="40%">
               <div className="workspace-area" ref={workspaceRef} style={{ position: "relative" }}>
                 <div className="workspace-col">
                   <div className="workspace-pane">
@@ -768,22 +768,26 @@ function App() {
               </div>
             </Panel>
 
+            <Separator className="resize-handle resize-handle-h" />
+
             {/* 右栏：流程管线 + 智能对话，固定宽度 */}
-            <div className="sidebar-panel sidebar-tools" style={{ width: 280 }}>
-              <div className="sidebar-section">
-                <div className="sidebar-header">流程管线</div>
-                <div className="sidebar-content">
-                  <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
+            <Panel defaultSize={280} minSize={250} maxSize={400}>
+              <div className="sidebar-panel sidebar-tools">
+                <div className="sidebar-section">
+                  <div className="sidebar-header">流程管线</div>
+                  <div className="sidebar-content">
+                    <PipelineStatus blocksTotal={tocTree.reduce((s, n) => s + countNodes(n), 0)} currentStage={importProgress?.stage} />
+                  </div>
+                </div>
+                <div className="sidebar-divider" />
+                <div className="sidebar-section">
+                  <div className="sidebar-header">智能对话</div>
+                  <div className="sidebar-content">
+                    <AgentConsole />
+                  </div>
                 </div>
               </div>
-              <div className="sidebar-divider" />
-              <div className="sidebar-section">
-                <div className="sidebar-header">智能对话</div>
-                <div className="sidebar-content">
-                  <AgentConsole />
-                </div>
-              </div>
-            </div>
+            </Panel>
           </Group>
         </Panel>
 
