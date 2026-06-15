@@ -1088,6 +1088,57 @@ pub fn get_page_mapping_json(
     Ok(Some(json))
 }
 
+/// 获取指定页范围的 PageMapping JSON（按需加载，供前端 PDF viewer 使用）
+#[tauri::command]
+pub fn get_page_mapping_range(
+    state: tauri::State<'_, ProjectState>,
+    page_start: usize,
+    page_end: usize,
+) -> Result<Option<String>, String> {
+    let path_guard = state.project_path.lock().map_err(|e| e.to_string())?;
+    let project_path = path_guard.as_ref().ok_or("没有打开的项目")?;
+    let assets_dir = project_path.join("assets");
+
+    let source = ocr_adapter::detect_ocr_source(&assets_dir)
+        .ok_or("未检测到 OCR 数据源")?;
+    
+    let adapter = ocr_adapter::create_adapter(&source);
+    let mapping = adapter.load_page_mapping(&assets_dir)?;
+
+    // 只序列化指定页范围
+    let pages: Vec<SerializablePageEntry> = mapping.pages.iter()
+        .filter(|p| {
+            let page_num = p.page_idx + 1; // page_idx is 0-based, convert to 1-based
+            page_num >= page_start && page_num <= page_end
+        })
+        .map(|p| SerializablePageEntry {
+            page_idx: p.page_idx,
+            page_size: p.page_size,
+            blocks: p.blocks.iter().map(|b| SerializableBlockEntry {
+                id: b.id.clone(),
+                block_type: b.block_type.to_string(),
+                bbox: b.bbox,
+                text: b.text.clone(),
+                level: b.level,
+                spans: b.spans.iter().map(|s| SerializableSpanEntry {
+                    bbox: s.bbox,
+                    content: s.content.clone(),
+                }).collect(),
+            }).collect(),
+        }).collect();
+
+    let partial = SerializablePageMapping {
+        source: mapping.source.to_string(),
+        page_count: mapping.page_count,
+        pages,
+    };
+
+    let json = serde_json::to_string(&partial)
+        .map_err(|e| format!("序列化 PageMapping 失败: {}", e))?;
+    
+    Ok(Some(json))
+}
+
 /// 可序列化的 PageMapping（用于 JSON 输出）
 #[derive(serde::Serialize)]
 struct SerializablePageMapping {

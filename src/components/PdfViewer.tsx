@@ -156,6 +156,31 @@ const PdfViewer = ({
     [pageMapping, onBboxRequest, calculateBboxes, evictOldPages]
   );
 
+  // 按需加载指定页范围的 page mapping
+  const loadPageMappingRange = useCallback(
+    async (page: number, total: number) => {
+      const start = Math.max(1, page - 1);
+      const end = Math.min(total, page + 1);
+      try {
+        const mappingJson = await invoke<string | null>("get_page_mapping_range", {
+          PageStart: start,
+          PageEnd: end,
+        });
+        if (mappingJson) {
+          try {
+            const mapping = JSON.parse(mappingJson);
+            setPageMapping(mapping);
+          } catch (e) {
+            console.error("[PdfViewer] Failed to parse page mapping range:", e);
+          }
+        }
+      } catch (e) {
+        console.error("[PdfViewer] Failed to load page mapping range:", e);
+      }
+    },
+    []
+  );
+
   // 加载页数和 page mapping（PDF 路径由后端自动获取）
   useEffect(() => {
     // 没有项目路径时不初始化（等待项目打开）
@@ -179,22 +204,13 @@ const PdfViewer = ({
       }
     }, 180000); // 180秒超时（后端渲染超时 120秒）
 
-    Promise.all([
-      invoke<number>("get_pdf_page_count"),
-      invoke<string | null>("get_page_mapping_json"),
-    ])
-      .then(async ([count, mappingJson]) => {
-        // 解析 page mapping
-        if (mappingJson) {
-          try {
-            const mapping = JSON.parse(mappingJson);
-            setPageMapping(mapping);
-          } catch (e) {
-            console.error("[PdfViewer] Failed to parse page mapping:", e);
-          }
-        }
-
+    // 只加载页数，page mapping 按需加载
+    invoke<number>("get_pdf_page_count")
+      .then(async (count) => {
         setTotalPages(count);
+
+        // 按需加载初始页的 page mapping (1, 2, 3)
+        await loadPageMappingRange(1, count);
 
         // 加载初始页面 (1, 2, 3)
         setLoadingMsg("渲染页面...");
@@ -210,7 +226,7 @@ const PdfViewer = ({
         setLoading(false);
         setError(`初始化失败: ${e}`);
       });
-  }, [projectPath, loadPageRange]);
+  }, [projectPath, loadPageRange, loadPageMappingRange]);
 
   // 翻页处理
   const goToPage = useCallback(
@@ -218,9 +234,11 @@ const PdfViewer = ({
       if (page < 1 || page > totalPages) return;
       setCurrentPage(page);
       onPageChange?.(page);
+      // 按需加载新页范围的 page mapping
+      loadPageMappingRange(page, totalPages);
       loadPageRange(page, totalPages);
     },
-    [currentPage, totalPages, onPageChange, loadPageRange]
+    [currentPage, totalPages, onPageChange, loadPageRange, loadPageMappingRange]
   );
 
   // 键盘翻页

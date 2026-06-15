@@ -55,6 +55,30 @@ impl PdfCache {
 // 全局缓存实例
 static PDF_CACHE: Mutex<PdfCache> = Mutex::new(PdfCache::new(0));
 
+// 请求取消：追踪最新请求 ID（按项目隔离）
+static ACTIVE_REQUESTS: Mutex<HashMap<String, u64>> = Mutex::new(HashMap::new());
+
+/// 获取当前活跃请求 ID（用于取消检测）
+/// 返回 (project_path, request_id)
+fn get_active_request_id(project_path: &str) -> u64 {
+    let requests = ACTIVE_REQUESTS.lock().unwrap();
+    *requests.get(project_path).unwrap_or(&0)
+}
+
+/// 设置新请求 ID（递增）
+fn set_new_request_id(project_path: &str) -> u64 {
+    let mut requests = ACTIVE_REQUESTS.lock().unwrap();
+    let next = *requests.get(project_path).unwrap_or(&0) + 1;
+    requests.insert(project_path.to_string(), next);
+    next
+}
+
+/// 清除项目的请求 ID
+fn clear_request_id(project_path: &str) {
+    let mut requests = ACTIVE_REQUESTS.lock().unwrap();
+    requests.remove(project_path);
+}
+
 /// 初始化 PDF 缓存（在 app 启动时调用一次）
 pub fn init_pdf_cache(max_pages_per_project: usize) {
     let mut cache = PDF_CACHE.lock().unwrap();
@@ -137,6 +161,7 @@ pub async fn render_pdf_pages(
 pub fn clear_project_cache(project_path: &str) {
     let mut cache = PDF_CACHE.lock().unwrap();
     cache.clear_project(project_path);
+    clear_request_id(project_path);
 }
 
 /// 获取 PDF 总页数（从当前打开的项目自动获取 PDF，使用 PDFium 直接获取）

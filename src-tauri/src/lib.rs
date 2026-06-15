@@ -423,6 +423,7 @@ pub fn run() {
             project_manager::read_file_bytes,
             project_manager::save_screenshot,
             project_manager::get_page_mapping_json,
+            project_manager::get_page_mapping_range,
             // db_engine
             db_engine::get_toc,
             db_engine::get_blocks,
