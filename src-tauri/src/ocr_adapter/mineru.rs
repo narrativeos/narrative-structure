@@ -149,6 +149,7 @@ fn load_content_v2(path: &Path) -> Result<(Vec<PageEntry>, usize), String> {
 
         pages.push(PageEntry {
             page_idx,
+            page_num: (page_idx + 1) as u32,
             page_size: [0.0, 0.0], // v2 没有 page_size，后续由 _middle.json 补充
             blocks,
         });
@@ -197,6 +198,7 @@ fn load_fallback_content_list(assets_dir: &Path) -> Result<(Vec<PageEntry>, usiz
 
         pages.push(PageEntry {
             page_idx,
+            page_num: (page_idx + 1) as u32,
             page_size: [0.0, 0.0],
             blocks,
         });

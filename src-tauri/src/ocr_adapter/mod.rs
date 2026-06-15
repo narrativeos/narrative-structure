@@ -97,8 +97,10 @@ pub struct BlockEntry {
 /// 单页条目
 #[derive(Debug, Clone)]
 pub struct PageEntry {
-    /// 页码（0-indexed）
+    /// 页码（0-indexed，内部使用）
     pub page_idx: usize,
+    /// 页码（1-indexed，对外输出和前端展示）
+    pub page_num: u32,
     /// 页面尺寸 [width, height]
     pub page_size: [f64; 2],
     /// 该页的所有内容块

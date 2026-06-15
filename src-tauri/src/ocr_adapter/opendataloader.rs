@@ -85,6 +85,7 @@ impl OcrAdapter for OpenDataLoaderAdapter {
 
             pages.push(PageEntry {
                 page_idx,
+                page_num: page_num_1idx as u32, // 1-indexed
                 page_size,
                 blocks,
             });

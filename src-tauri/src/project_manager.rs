@@ -1106,12 +1106,14 @@ pub fn get_page_mapping_range(
     let mapping = adapter.load_page_mapping(&assets_dir)?;
 
     // 只序列化指定页范围
+    let page_start_u32 = page_start as u32;
+    let page_end_u32 = page_end as u32;
     let pages: Vec<SerializablePageEntry> = mapping.pages.iter()
         .filter(|p| {
-            let page_num = p.page_idx + 1; // page_idx is 0-based, convert to 1-based
-            page_num >= page_start && page_num <= page_end
+            p.page_num >= page_start_u32 && p.page_num <= page_end_u32
         })
         .map(|p| SerializablePageEntry {
+            page_num: p.page_num,
             page_idx: p.page_idx,
             page_size: p.page_size,
             blocks: p.blocks.iter().map(|b| SerializableBlockEntry {
@@ -1149,6 +1151,10 @@ struct SerializablePageMapping {
 
 #[derive(serde::Serialize)]
 struct SerializablePageEntry {
+    /// 页码（1-indexed，前端展示和匹配使用）
+    #[serde(rename = "page_num")]
+    page_num: u32,
+    /// 页码（0-indexed，内部使用）
     page_idx: usize,
     page_size: [f64; 2],
     blocks: Vec<SerializableBlockEntry>,
@@ -1175,6 +1181,7 @@ fn mapping_to_serializable(mapping: &ocr_adapter::PageMapping) -> SerializablePa
         source: mapping.source.to_string(),
         page_count: mapping.page_count,
         pages: mapping.pages.iter().map(|p| SerializablePageEntry {
+            page_num: p.page_num,
             page_idx: p.page_idx,
             page_size: p.page_size,
             blocks: p.blocks.iter().map(|b| SerializableBlockEntry {
