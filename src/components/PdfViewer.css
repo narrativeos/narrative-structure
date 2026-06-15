@@ -127,3 +127,10 @@
   color: #999;
   font-size: 14px;
 }
+
+/* 占位页：保持当前页居中布局（上下对称） */
+.page-wrap.placeholder-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  pointer-events: none;
+}

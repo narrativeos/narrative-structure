@@ -311,8 +311,8 @@ const PdfViewer = ({
     <div className="pdf-viewer" ref={containerRef}>
       <div className="pdf-content">
         <div className="page-stage">
-          {/* 上一页 */}
-          {currentPage > 1 && prevPage && (
+          {/* 上一页 / 上方占位 */}
+          {currentPage > 1 && prevPage ? (
             <div className="page-wrap prev-page" id={`page-${currentPage - 1}`}>
               <img
                 src={`data:image/png;base64,${prevPage.image_base64}`}
@@ -321,6 +321,8 @@ const PdfViewer = ({
               />
               <div className="page-num">p{currentPage - 1}</div>
             </div>
+          ) : (
+            <div className="page-wrap prev-page placeholder-page" />
           )}
 
           {/* 当前页 */}
@@ -335,8 +337,8 @@ const PdfViewer = ({
             </div>
           )}
 
-          {/* 下一页 */}
-          {currentPage < totalPages && nextPage && (
+          {/* 下一页 / 下方占位 */}
+          {currentPage < totalPages && nextPage ? (
             <div className="page-wrap next-page" id={`page-${currentPage + 1}`}>
               <img
                 src={`data:image/png;base64,${nextPage.image_base64}`}
@@ -345,6 +347,8 @@ const PdfViewer = ({
               />
               <div className="page-num">p{currentPage + 1}</div>
             </div>
+          ) : (
+            <div className="page-wrap next-page placeholder-page" />
           )}
         </div>
 
