@@ -397,6 +397,9 @@ window.parent.postMessage({{type:'bbox-pos',page:e.data.page,pageRect:{{left:pr.
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化 PDF 渲染缓存（每个项目最多缓存 20 页）
+    pdf_render::init_pdf_cache(20);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())

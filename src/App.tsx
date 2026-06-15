@@ -51,6 +51,14 @@ function countNodes(node: TocNode): number {
   return 1 + node.children.reduce((s, c) => s + countNodes(c), 0);
 }
 
+/**
+ * 从 Block 的 metadata JSON 中提取页码
+ * 统一入口，避免散落多处解析
+ */
+function getPage(block: Block): number {
+  try { return JSON.parse(block.metadata || "{}").page || 0; } catch { return 0; }
+}
+
 // ---- 最近项目持久化 ----
 interface ImportProgress { stage: string; percent: number; detail: string; }
 interface RecentProject { name: string; path: string; time: number }
@@ -227,8 +235,7 @@ function App() {
   const fillPageWindow = useCallback((blocks: Block[], pageStart: number, pageEnd: number) => {
     const pageMap = new Map<number, Block[]>();
     for (const b of blocks) {
-      let p = 0;
-      try { p = JSON.parse(b.metadata || "{}").page || 0; } catch {}
+      const p = getPage(b);
       if (p <= 0 || p < pageStart || p > pageEnd) continue;
       if (!pageMap.has(p)) pageMap.set(p, []);
       pageMap.get(p)!.push(b);
@@ -308,15 +315,18 @@ function App() {
       setProjectKey(k => k + 1);
       setStatusMsg(msg);
       addRecent(pName, path);
-      const toc = await invoke<TocNode[]>("get_toc");
+      // 并行加载 TOC + 页码统计
+      const [toc, stats] = await Promise.all([
+        invoke<TocNode[]>("get_toc"),
+        invoke<[number, number][]>("get_page_stats"),
+      ]);
       setTocTree(toc);
-      // 页码统计
-      const stats = await invoke<[number, number][]>("get_page_stats");
       setImportLogs(prev => [...prev, `📊 页码分布: ${stats.length} 个不同页码，共 ${stats.reduce((s,[,c]) => s+c, 0)} 行`,
         ...stats.map(([p, c]) => `  p${p}: ${c} 行`).slice(0, 30),
         stats.length > 30 ? `  ... 共 ${stats.length} 页` : ""
       ].filter(Boolean));
     } catch (err) {
+      console.error("[loadProject]", err);
       setStatusMsg(`错误: ${err}`);
     }
   }, []);
@@ -496,10 +506,8 @@ function App() {
       if (reqId !== pageReqIdRef.current) return;
       const loadedPages = new Set<number>();
       for (const b of blocks) {
-        try {
-          const p = JSON.parse(b.metadata || "{}").page || 0;
-          if (p > 0) loadedPages.add(p);
-        } catch {}
+        const p = getPage(b);
+        if (p > 0) loadedPages.add(p);
       }
       setImportLogs(prev => [...prev.slice(-19), `📖 翻到 p${page} → 请求 p${pageStart}-p${pageEnd}（3页窗口），实际 ${loadedPages.size} 页/${blocks.length} 行`]);
       const filledBlocks = fillPageWindow(blocks, pageStart, pageEnd);
@@ -508,7 +516,8 @@ function App() {
       pageBlocksRef.current = filledBlocks;
       setPageBlocks(filledBlocks);
       setActiveBlock(null);
-    } catch {
+    } catch (err) {
+      console.error("[handlePageChange]", err);
       if (reqId !== pageReqIdRef.current) return;
       try {
         const blocks = await invoke<Block[]>("get_blocks_paginated", { limit: 1, offset: page - 1 });
@@ -519,7 +528,10 @@ function App() {
           pageBlocksRef.current = blocks;
           setPageBlocks(blocks);
         }
-      } catch {}
+      } catch (fallbackErr) {
+        console.error("[handlePageChange] fallback also failed:", fallbackErr);
+        setStatusMsg(`翻页失败: ${fallbackErr}`);
+      }
     }
   }, [fillPageWindow]);
 
@@ -533,17 +545,14 @@ function App() {
       setPageBlocks(null); // 切换到单块模式
 
       // 用 metadata.page 精确跳转 PDF
-      let targetPage = 0;
-      try {
-        const meta = JSON.parse(head.metadata || "{}");
-        if (meta.page) targetPage = meta.page as number;
-      } catch {}
+      const targetPage = getPage(head);
       // 注意：PdfViewer 组件现在内部管理页码状态
       // 如需跳转，可通过 handlePageChange(targetPage) 触发
       if (targetPage > 0) {
         // 暂时注释：需要 PdfViewer 暴露 navigateTo 方法
       }
     } catch (err) {
+      console.error("[handleSelectBlock]", err);
       setStatusMsg(`加载块失败: ${err}`);
     }
   }, []);

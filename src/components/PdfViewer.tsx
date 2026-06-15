@@ -58,6 +58,28 @@ const PdfViewer = ({
   const [pageMapping, setPageMapping] = useState<PageMappingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // LRU: 跟踪已加载的页面，超出窗口范围的自动清理
+  const loadedPagesRef = useRef<Set<number>>(new Set());
+
+  // LRU 清理：保留当前页 ±5 页，清除超出范围的旧图片
+  const evictOldPages = useCallback((currPage: number) => {
+    const keepRange = 5; // 保留 ±5 页
+    const minKeep = Math.max(1, currPage - keepRange);
+    const maxKeep = totalPages > 0 ? Math.min(totalPages, currPage + keepRange) : currPage + keepRange;
+
+    setPages(prev => {
+      const updated: Record<number, PageImage> = { ...prev };
+      let evicted = false;
+      loadedPagesRef.current.forEach((pageNum: number) => {
+        if (pageNum < minKeep || pageNum > maxKeep) {
+          delete updated[pageNum];
+          loadedPagesRef.current.delete(pageNum);
+          evicted = true;
+        }
+      });
+      return evicted ? updated : prev;
+    });
+  }, [totalPages]);
 
   // 从 page mapping 计算 bbox 位置
   const calculateBboxes = useCallback((
@@ -94,7 +116,7 @@ const PdfViewer = ({
     async (page: number, total: number) => {
       const start = Math.max(1, page - 1);
       const end = Math.min(total, page + 1);
-      const pageNumbers = [];
+      const pageNumbers: number[] = [];
       for (let i = start; i <= end; i++) {
         pageNumbers.push(i);
       }
@@ -110,9 +132,13 @@ const PdfViewer = ({
           const updated = { ...prev };
           newPages.forEach((p) => {
             updated[p.page_num] = p;
+            loadedPagesRef.current.add(p.page_num);
           });
           return updated;
         });
+
+        // LRU 清理：加载新页面后清除超出范围的旧图片
+        evictOldPages(page);
 
         // 请求 bbox 数据
         if (onBboxRequest) {
@@ -127,7 +153,7 @@ const PdfViewer = ({
         setError(`渲染页面失败: ${err}`);
       }
     },
-    [pageMapping, onBboxRequest, calculateBboxes]
+    [pageMapping, onBboxRequest, calculateBboxes, evictOldPages]
   );
 
   // 加载页数和 page mapping（PDF 路径由后端自动获取）
@@ -142,6 +168,7 @@ const PdfViewer = ({
     setLoadingMsg("加载 PDF...");
     setPages({});
     setCurrentPage(1);
+    loadedPagesRef.current.clear();
 
     // 设置超时（使用 ref 来追踪是否已完成）
     const completedRef = { value: false };

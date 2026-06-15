@@ -1,19 +1,64 @@
 use liteparse::{LiteParse, LiteParseConfig};
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use tauri::command;
 use tokio::time::{timeout, Duration};
 
 use crate::project_manager::ProjectState;
 
 /// PDF 页面渲染结果
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Debug, Clone)]
 pub struct PdfPageImage {
     pub page_num: u32,
     pub width: u32,
     pub height: u32,
     /// Base64 编码的 PNG 图片
     pub image_base64: String,
+}
+
+/// 简单的 PDF 渲染缓存（按项目隔离）
+struct PdfCache {
+    /// project_path -> (page_num -> PdfPageImage)
+    maps: HashMap<String, HashMap<u32, PdfPageImage>>,
+    /// 每个项目最多缓存页数
+    max_pages_per_project: usize,
+}
+
+impl PdfCache {
+    fn new(max_pages: usize) -> Self {
+        Self {
+            maps: HashMap::new(),
+            max_pages_per_project,
+        }
+    }
+
+    fn get(&self, project_path: &str, page_num: u32) -> Option<&PdfPageImage> {
+        self.maps.get(project_path)?.get(&page_num)
+    }
+
+    fn insert(&mut self, project_path: String, page: PdfPageImage) {
+        let map = self.maps.entry(project_path).or_insert_with(HashMap::new);
+        // LRU 近似：如果超过限制，清除最老的（HashMap 不保证顺序，简单清除一半）
+        if map.len() >= self.max_pages_per_project {
+            map.clear();
+        }
+        map.insert(page.page_num, page);
+    }
+
+    fn clear_project(&mut self, project_path: &str) {
+        self.maps.remove(project_path);
+    }
+}
+
+// 全局缓存实例
+static PDF_CACHE: Mutex<PdfCache> = Mutex::new(PdfCache::new(0));
+
+/// 初始化 PDF 缓存（在 app 启动时调用一次）
+pub fn init_pdf_cache(max_pages_per_project: usize) {
+    let mut cache = PDF_CACHE.lock().unwrap();
+    *cache = PdfCache::new(max_pages_per_project);
 }
 
 /// 请求渲染 PDF 页面（从当前打开的项目自动获取 PDF）
@@ -24,36 +69,74 @@ pub async fn render_pdf_pages(
     dpi: Option<u32>,
 ) -> Result<Vec<PdfPageImage>, String> {
     let pdf_path = get_project_pdf_path(&state)?;
+    let project_path_str = pdf_path.clone();
     let dpi = dpi.unwrap_or(150);
-    
-    // 创建 LiteParse 配置
-    let mut config = LiteParseConfig::default();
-    config.dpi = dpi as f32;
-    config.quiet = true;
-    
-    let parser = LiteParse::new(config);
-    
-    // 使用 liteparse 渲染指定页面，设置 120 秒超时（大 PDF 可能需要更长时间）
-    let screenshots_result = timeout(
-        Duration::from_secs(120),
-        parser.screenshot(&pdf_path, page_numbers)
-    ).await.map_err(|_| "渲染超时（120秒），该 PDF 页面尺寸过大，建议拆分文档或使用其他 PDF 查看器")?;
-    
-    let screenshots = screenshots_result.map_err(|e| format!("LiteParse screenshot error: {}", e))?;
-    
-    // 转换为 base64
+    let pages_to_render = page_numbers.unwrap_or(vec![1]);
+
+    // 先检查缓存
     let mut result = Vec::new();
-    for s in screenshots {
-        let image_b64 = base64_encode(&s.image_bytes);
-        result.push(PdfPageImage {
-            page_num: s.page_num,
-            width: s.width,
-            height: s.height,
-            image_base64: image_b64,
-        });
+    let mut pages_to_render_now: Vec<u32> = Vec::new();
+
+    {
+        let mut cache = PDF_CACHE.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+        for &pn in &pages_to_render {
+            if let Some(cached) = cache.get(&project_path_str, pn) {
+                result.push(cached.clone());
+            } else {
+                pages_to_render_now.push(pn);
+            }
+        }
     }
-    
+
+    // 渲染缓存未命中的页面
+    if !pages_to_render_now.is_empty() {
+        // 创建 LiteParse 配置
+        let mut config = LiteParseConfig::default();
+        config.dpi = dpi as f32;
+        config.quiet = true;
+
+        let parser = LiteParse::new(config);
+
+        // 使用 liteparse 渲染指定页面，设置 60 秒超时（降低超时时间）
+        let screenshots_result = timeout(
+            Duration::from_secs(60),
+            parser.screenshot(&pdf_path, Some(pages_to_render_now.clone()))
+        ).await.map_err(|_| "渲染超时（60秒），该 PDF 页面尺寸过大，建议拆分文档或使用其他 PDF 查看器")?;
+
+        let screenshots = screenshots_result.map_err(|e| format!("LiteParse screenshot error: {}", e))?;
+
+        // 写入缓存 + 合并结果
+        {
+            let mut cache = PDF_CACHE.lock().map_err(|e| format!("Cache lock error: {}", e))?;
+            for s in screenshots {
+                let image_b64 = base64_encode(&s.image_bytes);
+                let page = PdfPageImage {
+                    page_num: s.page_num,
+                    width: s.width,
+                    height: s.height,
+                    image_base64: image_b64.clone(),
+                };
+                cache.insert(project_path_str.clone(), page);
+                result.push(PdfPageImage {
+                    page_num: s.page_num,
+                    width: s.width,
+                    height: s.height,
+                    image_base64,
+                });
+            }
+        }
+    }
+
+    // 按请求顺序返回
+    result.sort_by_key(|p| pages_to_render.iter().position(|&x| x == p.page_num).unwrap_or(u32::MAX));
+
     Ok(result)
+}
+
+/// 清除指定项目的 PDF 缓存（切换项目时调用）
+pub fn clear_project_cache(project_path: &str) {
+    let mut cache = PDF_CACHE.lock().unwrap();
+    cache.clear_project(project_path);
 }
 
 /// 获取 PDF 总页数（从当前打开的项目自动获取 PDF，使用 PDFium 直接获取）

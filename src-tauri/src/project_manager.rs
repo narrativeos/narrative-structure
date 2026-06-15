@@ -10,6 +10,7 @@ use std::time::UNIX_EPOCH;
 use crate::markdown_parser::parse_markdown;
 use crate::ocr_adapter;
 use crate::page_mapper;
+use crate::pdf_render;
 
 
 /// 数据库建表 SQL（与 scripts/init_db.py 保持一致）
@@ -453,6 +454,13 @@ fn open_project_inner(
         return Err(format!("目录不存在: {}", project_path.display()));
     }
 
+    // 清除旧项目的 PDF 缓存
+    if let Ok(path_guard) = state.project_path.lock() {
+        if let Some(prev) = path_guard.as_ref() {
+            pdf_render::clear_project_cache(&prev.display().to_string());
+        }
+    }
+
     let db_path = project_path.join("narrative.db");
 
     // 2. 检查 narrative.db 是否存在
@@ -519,6 +527,11 @@ pub fn close_project(state: tauri::State<'_, ProjectState>) -> Result<String, St
 
     let prev_path = path_guard.take();
     *conn_guard = None;
+
+    // 清除 PDF 缓存
+    if let Some(ref p) = prev_path {
+        pdf_render::clear_project_cache(&p.display().to_string());
+    }
 
     match prev_path {
         Some(p) => Ok(format!("项目已关闭: {}", p.display())),
