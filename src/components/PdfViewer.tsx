@@ -124,16 +124,13 @@ const PdfViewer = ({
 
   // 加载指定范围的页面（PDF 路径由后端自动获取）
   // 空依赖数组：所有外部值通过 refs 读取
-  const loadPageRange = useCallback(async (page: number, total: number) => {
-    const start = Math.max(1, page - 1);
-    const end = Math.min(total, page + 1);
-    const pageNumbers: number[] = [];
-    for (let i = start; i <= end; i++) {
-      pageNumbers.push(i);
-    }
+  // 优化：只请求当前页，减少大 PDF 的渲染压力（后端有缓存，翻页后自动命中）
+  const loadPageRange = useCallback(async (page: number, _total: number) => {
+    // 只加载当前页，不再预加载相邻页（PDFium 每次 load_document 很慢）
+    const pageNumbers = [page];
 
     try {
-      setLoadingMsg(`渲染页面 ${start}-${end}...`);
+      setLoadingMsg(`渲染页面 ${page}...`);
       const newPages = await invoke<PageImage[]>("render_pdf_pages", {
         PageNumbers: pageNumbers,
         Dpi: 150,
